@@ -11,6 +11,28 @@ pub struct ApplicationSettings {
     pub host: String,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
+    pub tx: Tx,
+    pub tree: Tree,
+}
+
+use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier};
+
+impl ApplicationSettings {
+    pub fn get_tx_vk(&self) -> Result<verifier::VK<Bn256>, std::io::Error> {
+        let vk_file = std::fs::File::open(&self.tx.vk)?;
+        let vk: verifier::VK<Bn256> = serde_json::from_reader(vk_file)?;
+        Ok(vk)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Tx {
+    pub vk: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Tree {
+    pub params: String,
 }
 
 pub fn get_config() -> Result<Settings, config::ConfigError> {

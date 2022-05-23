@@ -1,23 +1,18 @@
 use actix_http::StatusCode;
-use actix_web::{web::{self}, HttpResponse, ResponseError};
+use actix_web::{
+    web::{self, Data},
+    HttpResponse, ResponseError,
+};
 use serde::{Deserialize, Serialize};
 
-use libzeropool::{
-    fawkes_crypto::{
-        backend::bellman_groth16::{engines::Bn256, prover},
-        engines::bn256::Fr,
-        ff_uint::Num,
-    },
-    // native::boundednum::BoundedNum,
+use libzeropool::fawkes_crypto::{
+    backend::bellman_groth16::{engines::Bn256, prover, verifier},
+    engines::bn256::Fr,
+    ff_uint::Num,
 };
-
-// use libzeropool::fawkes_crypto::backend::bellman_groth16::verifier::VK;
-// use libzeropool::fawkes_crypto::backend::bellman_groth16::{verifier::verify, Parameters};
-// use libzeropool::POOL_PARAMS;
-// use libzeropool_rs::proof::prove_tx;
-
-// use libzeropool_rs::client::{state::State, TxType, UserAccount};
 use tokio::sync::mpsc::Sender;
+
+use crate::configuration::ApplicationSettings;
 
 #[derive(Debug)]
 pub enum ServiceError {
@@ -25,23 +20,21 @@ pub enum ServiceError {
     InternalError,
 }
 
+impl From<std::io::Error> for ServiceError {
+    fn from(_: std::io::Error) -> Self {
+        ServiceError::InternalError
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
-    proof: Proof,
+    pub proof: Proof,
     pub memo: String,
     tx_type: String,
     deposit_signature: String,
 }
 
-// impl TryFrom<Json<Transaction>> for Transaction {
-//     type Error = String;
-
-//     fn try_from(value: Json<Transaction>) -> Result<Self, Self::Error> {
-//         todo!()
-//     }
-    
-// }
 
 impl core::fmt::Debug for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -54,9 +47,9 @@ impl core::fmt::Debug for Transaction {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Proof {
-    inputs: Vec<Num<Fr>>,
-    proof: prover::Proof<Bn256>,
+pub struct Proof {
+    pub inputs: Vec<Num<Fr>>,
+    pub proof: prover::Proof<Bn256>,
 }
 
 impl std::fmt::Display for ServiceError {
@@ -78,14 +71,37 @@ pub async fn query() -> Result<HttpResponse, ServiceError> {
 
 pub async fn transact(
     request: web::Json<Transaction>,
-    sender: web::Data<Sender<Transaction>>,
+    sender: web::Data<Sender<Data<Transaction>>>,
+    config: web::Data<ApplicationSettings>,
 ) -> Result<HttpResponse, ServiceError> {
+    let transaction: Transaction = request.0.into();
 
-    let transaction:Transaction = request.0.into();
+    /*
+    TODO:
+    1. check nullifier for double spend
 
-    tracing::info!("got http request {:#?}", transaction);
+    2. check fee >= relayer fee
 
-    sender.send(transaction).await.unwrap();
+    */
+
+    // workaround: the verification key is supposed to be initialized once at startup
+    let tx_vk = config.get_tx_vk()?;
+
+    // this is actually Arc
+    let copy = web::Data::new(transaction);
+
+    // check proof validity
+    if !verifier::verify(&tx_vk, &transaction.proof.proof, &transaction.proof.inputs) {
+        return Err(ServiceError::BadRequest("Invalid proof".to_owned()));
+    }
+
+    //TODO:  3 calculate new virtual state root
+
+    // send to channel for further processing
+    sender.send(copy).await.unwrap();
+
+
+    //TODO:   4 generate UUID for request and save to in-memory map
 
     Ok(HttpResponse::Ok().finish())
 }

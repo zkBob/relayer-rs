@@ -30,7 +30,8 @@ async fn main() -> Result<(), std::io::Error>{
 
     run(
         listener,
-        sender
+        sender,
+        configuration.application.tx.vk
     )?
     .await
  
