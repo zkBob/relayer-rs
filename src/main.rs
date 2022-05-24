@@ -1,5 +1,6 @@
-use std::net::TcpListener;
+use std::{net::TcpListener, sync::Arc};
 
+use actix_web::web::Data;
 use relayer_rs::{telemetry::{init_subscriber, get_subscriber}, configuration::get_config, startup::run, routes::transactions::Transaction};
 use tokio::sync::mpsc;
 
@@ -18,8 +19,10 @@ async fn main() -> Result<(), std::io::Error>{
         configuration.application.host, configuration.application.port
     );
     let listener = TcpListener::bind(address)?;
+    
+    let vk = configuration.application.get_tx_vk()?;
 
-    let (sender, mut rx) = mpsc::channel::<Transaction>(1000);
+    let (sender, mut rx) = mpsc::channel::<Arc<Transaction>>(1000);
 
     tokio::spawn( async move {
         tracing::info!("starting receiver");
@@ -31,7 +34,7 @@ async fn main() -> Result<(), std::io::Error>{
     run(
         listener,
         sender,
-        configuration.application.tx.vk
+        vk
     )?
     .await
  

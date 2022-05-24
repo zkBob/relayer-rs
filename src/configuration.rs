@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_aux::field_attributes::deserialize_number_from_string;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Settings {
     pub application: ApplicationSettings,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone,Debug)]
 pub struct ApplicationSettings {
     pub host: String,
     #[serde(deserialize_with = "deserialize_number_from_string")]
@@ -19,18 +19,23 @@ use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verif
 
 impl ApplicationSettings {
     pub fn get_tx_vk(&self) -> Result<verifier::VK<Bn256>, std::io::Error> {
-        let vk_file = std::fs::File::open(&self.tx.vk)?;
+
+        let base_path = std::env::current_dir().expect("failed to determine current dir");
+        
+        let vk_path = base_path.join(&self.tx.vk);
+        tracing::info!("vk_path= {}", vk_path.as_os_str().to_string_lossy());
+        let vk_file = std::fs::File::open(base_path.join(&self.tx.vk))?;
         let vk: verifier::VK<Bn256> = serde_json::from_reader(vk_file)?;
         Ok(vk)
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone,Debug)]
 pub struct Tx {
     pub vk: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone,Debug)]
 pub struct Tree {
     pub params: String,
 }

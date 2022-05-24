@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use actix_http::StatusCode;
 use actix_web::{
     web::{self, Data},
@@ -71,7 +73,7 @@ pub async fn query() -> Result<HttpResponse, ServiceError> {
 
 pub async fn transact(
     request: web::Json<Transaction>,
-    sender: web::Data<Sender<Data<Transaction>>>,
+    sender: web::Data<Sender<Arc<Transaction>>>,
     config: web::Data<ApplicationSettings>,
 ) -> Result<HttpResponse, ServiceError> {
     let transaction: Transaction = request.0.into();
@@ -87,13 +89,15 @@ pub async fn transact(
     // workaround: the verification key is supposed to be initialized once at startup
     let tx_vk = config.get_tx_vk()?;
 
-    // this is actually Arc
-    let copy = web::Data::new(transaction);
+    
 
     // check proof validity
     if !verifier::verify(&tx_vk, &transaction.proof.proof, &transaction.proof.inputs) {
         return Err(ServiceError::BadRequest("Invalid proof".to_owned()));
     }
+
+    // this is actually Arc
+    let copy = Arc::new(transaction);
 
     //TODO:  3 calculate new virtual state root
 

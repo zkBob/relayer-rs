@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use actix_web::web::Data;
 use libzeropool::fawkes_crypto::backend::bellman_groth16::verifier;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
@@ -29,13 +32,13 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
         c
     };
 
-    let (sender, mut rx) = mpsc::channel::<Transaction>(1000);
+    let (sender, mut rx) = mpsc::channel::<Arc<Transaction>>(1000);
 
     let app = Application::build(config.clone(), sender).await?;
 
     let port = app.port();
 
-    let tx_vk = config.application.get_tx_vk().unwrap();
+    
     
     let address = format!("http://127.0.0.1:{}", port);
 

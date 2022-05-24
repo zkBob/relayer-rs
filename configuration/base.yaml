@@ -1,6 +1,6 @@
 application:
   port: 8000
   tx:
-    vk: ./data/params/tx_vk.json
+    vk: tests/data/params/tx_vk.json
   tree:
     params: ./data/params
