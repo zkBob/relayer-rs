@@ -28,7 +28,7 @@ pub enum ServiceError {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
-    proof: Proof,
+    pub proof: Proof,
     pub memo: String,
     tx_type: String,
     deposit_signature: String,
@@ -54,8 +54,8 @@ impl core::fmt::Debug for Transaction {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Proof {
-    inputs: Vec<Num<Fr>>,
+pub struct Proof {
+    pub inputs: Vec<Num<Fr>>,
     proof: prover::Proof<Bn256>,
 }
 
