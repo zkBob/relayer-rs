@@ -4,6 +4,9 @@ use relayer_rs::{
     telemetry::{get_subscriber, init_subscriber}, startup::run,
 };
 use std::net::TcpListener;
+
+use libzeropool::POOL_PARAMS;
+use relayer_rs::{merkle::MerkleTree};
 use tokio::sync::mpsc;
 
 #[actix_web::main]
@@ -25,10 +28,12 @@ async fn main() -> Result<(), std::io::Error> {
 
     let (sender, mut rx) = mpsc::channel::<TxRequest>(1000);
 
-    tokio::spawn(async move {
+    let mut tree = MerkleTree::new_test(POOL_PARAMS.clone());
+    tokio::spawn( async move {
         tracing::info!("starting receiver");
         while let Some(tx) = rx.recv().await {
-            tracing::info!("Channel received tx {:#?}", tx.memo);
+            tree.append_hash(tx.proof.inputs[2], false);
+            tracing::info!("Merkle root {:#?}", tree.get_root());
         }
     });
 
