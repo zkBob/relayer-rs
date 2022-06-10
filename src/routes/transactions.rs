@@ -1,14 +1,15 @@
 use std::sync::Arc;
 
 use actix_http::StatusCode;
-use actix_web::{
-    web::{self, Data},
-    HttpResponse, ResponseError,
-};
+use actix_web::{web, HttpResponse, ResponseError};
 use serde::{Deserialize, Serialize};
 
 use libzeropool::fawkes_crypto::{
-    backend::bellman_groth16::{engines::Bn256, prover, verifier},
+    backend::bellman_groth16::{
+        engines::Bn256,
+        prover,
+        verifier::{self, VK},
+    },
     engines::bn256::Fr,
     ff_uint::Num,
 };
@@ -37,6 +38,7 @@ pub struct Transaction {
     deposit_signature: String,
 }
 
+pub type TxRequest = Arc<Transaction>;
 
 impl core::fmt::Debug for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -73,8 +75,8 @@ pub async fn query() -> Result<HttpResponse, ServiceError> {
 
 pub async fn transact(
     request: web::Json<Transaction>,
-    sender: web::Data<Sender<Arc<Transaction>>>,
-    config: web::Data<ApplicationSettings>,
+    sender: web::Data<Sender<TxRequest>>,
+    vk: web::Data<VK<Bn256>>,
 ) -> Result<HttpResponse, ServiceError> {
     let transaction: Transaction = request.0.into();
 
@@ -86,13 +88,12 @@ pub async fn transact(
 
     */
 
-    // workaround: the verification key is supposed to be initialized once at startup
-    let tx_vk = config.get_tx_vk()?;
-
-    
-
     // check proof validity
-    if !verifier::verify(&tx_vk, &transaction.proof.proof, &transaction.proof.inputs) {
+    if !verifier::verify(
+        vk.as_ref(),
+        &transaction.proof.proof,
+        &transaction.proof.inputs,
+    ) {
         return Err(ServiceError::BadRequest("Invalid proof".to_owned()));
     }
 
@@ -103,7 +104,6 @@ pub async fn transact(
 
     // send to channel for further processing
     sender.send(copy).await.unwrap();
-
 
     //TODO:   4 generate UUID for request and save to in-memory map
 

@@ -1,10 +1,6 @@
-use std::sync::Arc;
-
-use actix_web::web::Data;
-use libzeropool::fawkes_crypto::backend::bellman_groth16::verifier;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
-use relayer_rs::routes::transactions::Transaction;
+use relayer_rs::routes::transactions:: TxRequest;
 use relayer_rs::startup::Application;
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
 use tokio::sync::mpsc;
@@ -32,7 +28,7 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
         c
     };
 
-    let (sender, mut rx) = mpsc::channel::<Arc<Transaction>>(1000);
+    let (sender, mut rx) = mpsc::channel::<TxRequest>(1000);
 
     let app = Application::build(config.clone(), sender).await?;
 
