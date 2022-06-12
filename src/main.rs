@@ -6,8 +6,8 @@ use relayer_rs::{
 use std::net::TcpListener;
 
 use libzeropool::POOL_PARAMS;
-use relayer_rs::{merkle::MerkleTree};
 use tokio::sync::mpsc;
+use libzeropool_rs::merkle::MerkleTree;
 
 #[actix_web::main]
 async fn main() -> Result<(), std::io::Error> {
