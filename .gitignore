@@ -1,2 +1,4 @@
 /target
 newrelic_agent.log
+tx.db
+.DS_Store

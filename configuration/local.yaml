@@ -1,3 +1,8 @@
 application:
   host: 127.0.0.1
   port: 8000
+web3:
+  provider_endpoint: http://localhost:8545
+  pool_address: 0x
+  credentials:
+    secret_key: 0x...

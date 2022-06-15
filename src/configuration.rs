@@ -4,6 +4,7 @@ use serde_aux::field_attributes::deserialize_number_from_string;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Settings {
     pub application: ApplicationSettings,
+    pub web3: Web3Settings
 }
 
 #[derive(Serialize, Deserialize, Clone,Debug)]
@@ -13,6 +14,20 @@ pub struct ApplicationSettings {
     pub port: u16,
     pub tx: Tx,
     pub tree: Tree,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Credentials {
+    secret_key: String
+}
+
+#[derive(Serialize,Deserialize,Clone,Debug)]
+pub struct Web3Settings {
+    pub provider_endpoint: String,
+    pub abi_path: String,
+    pub pool_address: String,
+    #[serde(skip_serializing)]
+    pub credentials: Credentials
 }
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier};

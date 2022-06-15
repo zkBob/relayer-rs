@@ -15,7 +15,7 @@ web3="0.18.0"
 tokio={version="1.17", features=["rt","rt-multi-thread","sync"]}
 libzeropool = { version = "0.5.3", default-features = false, features = ["in3out127"] }
 borsh = "0.9.1"
-libzeropool-rs = "0.3.8"
+libzeropool-rs = {version = "0.3.8", features = ["native"]}
 tracing = { version = "0.1.29", features = ["log"] }
 tracing-futures = "0.2.5"
 tracing-subscriber = { version = "0.2.12", features = ["registry", "env-filter"] }
@@ -24,11 +24,14 @@ tracing-log = "0.1.2"
 tracing-actix-web = "0.5.1"
 kvdb = "0.9.0"
 kvdb-web = { version = "0.9.0", optional = true }
-kvdb-rocksdb = { version = "0.11.0", optional = true }
 kvdb-memorydb = "0.9.0"
 getrandom = { version = "0.2.3" }
 sha3 = "0.10.0"
 serde_json = "1.0.64"
+secp256k1 = "0.21"
+ethabi = "17.1.0"
+kvdb-rocksdb = "0.11.0"
+
 
 [dev-dependencies]
 once_cell = "1.8.0"
