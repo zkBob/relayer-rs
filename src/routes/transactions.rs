@@ -15,8 +15,6 @@ use libzeropool::fawkes_crypto::{
 };
 use tokio::sync::mpsc::Sender;
 
-use crate::configuration::ApplicationSettings;
-
 #[derive(Debug)]
 pub enum ServiceError {
     BadRequest(String),
@@ -94,6 +92,7 @@ pub async fn transact(
         &transaction.proof.proof,
         &transaction.proof.inputs,
     ) {
+        tracing::info!("received bad proof");
         return Err(ServiceError::BadRequest("Invalid proof".to_owned()));
     }
 

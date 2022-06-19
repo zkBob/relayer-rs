@@ -1,5 +1,3 @@
-use std::{thread, time::Duration};
-
 use relayer_rs::routes::transactions::Transaction;
 
 use crate::helpers::spawn_app;

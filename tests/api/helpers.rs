@@ -1,3 +1,8 @@
+use std::sync::Mutex;
+
+use actix_web::web::Data;
+use libzeropool::POOL_PARAMS;
+use libzeropool_rs::merkle::MerkleTree;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::routes::transactions:: TxRequest;
@@ -30,7 +35,11 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
 
     let (sender, mut rx) = mpsc::channel::<TxRequest>(1000);
 
-    let app = Application::build(config.clone(), sender).await?;
+    let pending = Data::new( Mutex::new( MerkleTree::new_test(POOL_PARAMS.clone())));
+
+    let finalized = Data::new( Mutex::new( MerkleTree::new_test(POOL_PARAMS.clone())));
+
+    let app = Application::build(config.clone(), sender, pending, finalized ).await?;
 
     let port = app.port();
 
