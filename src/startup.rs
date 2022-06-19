@@ -5,9 +5,11 @@ use crate::{
 };
 
 use actix_web::{dev::Server, middleware, web, App, HttpServer};
+
 use kvdb::KeyValueDB;
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier};
 use libzeropool_rs::merkle::MerkleTree;
+use web3::types::{Bytes, H256, U256};
 
 use std::{net::TcpListener, sync::Mutex};
 use tokio::sync::mpsc::Sender;
@@ -92,9 +94,11 @@ impl<D: 'static + KeyValueDB> Application<D> {
 
             tracing::debug!("mising indices: {:?}", missing_indices);
 
+            //event Message(uint256 indexed index, bytes32 indexed hash, bytes message);
+
             let result = pool.contract.events("Message", (), (), ()); //TODO: hide this under the hood
 
-            let events: Vec<Vec<u8>> = result.await?;
+            let events: Vec<(U256, H256, Bytes)> = result.await?;
 
             tracing::debug!("{:?}", events);
         }
