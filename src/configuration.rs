@@ -18,7 +18,7 @@ pub struct ApplicationSettings {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Credentials {
-    _secret_key: String
+    secret_key: String
 }
 
 #[derive(Serialize,Deserialize,Clone,Debug)]

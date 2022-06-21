@@ -3,6 +3,7 @@ application:
   port: 8000
 web3:
   provider_endpoint: http://localhost:8545
-  pool_address: 0x
+  pool_address: c89ce4735882c9f0f0fe26686c53074e09b0d550
+
   credentials:
-    secret_key: 0x...
+    secret_key: 6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c

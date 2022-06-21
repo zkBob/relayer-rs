@@ -1,4 +1,4 @@
-use std::{fs::File, io::BufReader};
+use std::{fs::File, io::BufReader, str::FromStr};
 
 use web3::{
     contract::{Contract, Options},
@@ -6,7 +6,7 @@ use web3::{
     types::{H160, U256},
 };
 
-use crate::{configuration:: Web3Settings, startup::SyncError};
+use crate::{configuration::Web3Settings, startup::SyncError};
 
 pub struct Pool {
     pub contract: Contract<Http>,
@@ -18,16 +18,25 @@ impl Pool {
             .expect("failed to init web3 provider");
 
         let web3 = web3::Web3::new(http);
-        let file = BufReader::new(File::open(&config.abi_path)?);
+        // let file = BufReader::new(File::open(&config.abi_path)?);
+
+        let contract_address = H160::from_str(&config.pool_address).expect("bad pool address");
+
+        // let contract = Contract::from_json(
+        //     web3.eth(),
+        //     contract_address,
+        //     file.buffer(),
+        // )
+        // .expect("failed to init pool contract interface");
+
 
         let contract = Contract::from_json(
             web3.eth(),
-            H160::from_slice(config.pool_address.as_bytes()),
-            file.buffer(),
-        )
-        .expect("failed to init pool contract interface");
+            contract_address,
+            include_bytes!("../configuration/pool-abi.json"),
+        ).expect("failed to read contract");
 
-        Ok(Self{contract})
+        Ok(Self { contract })
     }
     pub async fn root(&self) -> Result<(U256, String), SyncError> {
         let contract = &self.contract;

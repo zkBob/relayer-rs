@@ -7,6 +7,6 @@ application:
 web3:
   provider_endpoint: http://localhost:8545
   pool_address: 0x
-  abi_path: ./configuration/pool-abi.json
+  abi_path: /Users/vladimirpopov/Blockchain/zkbob/relayer-rs/configuration/pool-abi.json
   credentials:
     secret_key: 0x...
