@@ -1,9 +1,10 @@
 use std::{fs::File, io::BufReader, str::FromStr};
 
+use libzeropool::fawkes_crypto::{ff_uint::Num, engines::bn256::Fr};
 use web3::{
     contract::{Contract, Options},
     transports::Http,
-    types::{H160, U256},
+    types::{H160, U256}, ethabi::Uint,
 };
 
 use crate::{configuration::Web3Settings, startup::SyncError};
@@ -38,14 +39,16 @@ impl Pool {
 
         Ok(Self { contract })
     }
-    pub async fn root(&self) -> Result<(U256, String), SyncError> {
+    pub async fn root(&self) -> Result<(U256, Num<Fr>), SyncError> {
         let contract = &self.contract;
         let result = contract.query("pool_index", (), None, Options::default(), None);
         let pool_index: U256 = result.await?;
 
         let result = contract.query("roots", (pool_index,), None, Options::default(), None);
 
-        let root: String = result.await?;
+        let root: U256 = result.await?;
+
+        let root = Num::from_str(&root.to_string()).unwrap();
 
         tracing::debug!("got root from contract {}", root);
 

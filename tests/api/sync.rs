@@ -27,5 +27,11 @@ async fn test_get_events() {
 
     let events = get_events(db, &config.web3).await.unwrap();
 
-    tracing::info!("events: {:#?}", events);
+    println!("events: {:#?}", events);
+}
+
+
+#[tokio::test]
+async fn test_json_rpc() {
+    
 }

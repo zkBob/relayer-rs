@@ -7,11 +7,11 @@ use crate::{
 use actix_web::{dev::Server, middleware, web, App, HttpServer};
 
 use kvdb::KeyValueDB;
-use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier};
+use libzeropool::fawkes_crypto::{backend::bellman_groth16::{engines::Bn256, verifier}, ff_uint::Num};
 use libzeropool_rs::merkle::MerkleTree;
 use web3::{types::{Bytes, H256, U256}, ethabi::TopicFilter};
 
-use std::{net::TcpListener, sync::Mutex};
+use std::{net::TcpListener, sync::Mutex, str::FromStr};
 use tokio::sync::mpsc::Sender;
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -107,13 +107,15 @@ pub async fn get_events<D: 'static + KeyValueDB>(
 
     let local_root = db.get_root();
     let local_index = db.next_index();
-    println!("here");
-    if local_root.to_string() != contract_root {
+    tracing::debug!("local root {:#?}", local_root);
+    tracing::debug!("contract root {:#?}", contract_root);
+
+    if !local_root.eq(&contract_root)  {
         let missing_indices: Vec<u64> = (local_index..contract_index.as_u64())
             .into_iter()
             .map(|i| local_index + (i + 1) * (OUT as u64 + 1))
             .collect();
-        println!("mising indices: {:?}", missing_indices);
+            tracing::debug!("mising indices: {:?}", missing_indices);
 
         //event Message(uint256 indexed index, bytes32 indexed hash, bytes message);
 
