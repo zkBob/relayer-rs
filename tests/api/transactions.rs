@@ -27,7 +27,7 @@ async fn post_transaction_works() {
 
     tracing::info!("sending request {:#?}", tx);
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let response = client
             .post(format!("{}/transact", app.address))
             .body(serde_json::to_string(&tx).unwrap())
@@ -36,6 +36,9 @@ async fn post_transaction_works() {
             .await
             .expect("failed to make request");
 
-        assert_eq!(response.status().as_u16(), 200 as u16);
+        response.status().as_u16()
     });
+
+    let result = handle.await.unwrap();
+    assert_eq!(result, 200 as u16);
 }
