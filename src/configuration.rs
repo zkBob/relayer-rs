@@ -80,12 +80,14 @@ pub fn get_config() -> Result<Settings, config::ConfigError> {
 pub enum Environment {
     Local,
     Production,
+    Kovan
 }
 
 impl Environment {
     fn as_str(&self) -> &'static str {
         match self {
             Environment::Local => "local.yaml",
+            Environment::Kovan => "kovan.yaml",
             Environment::Production => "production.yaml",
         }
     }
@@ -98,6 +100,7 @@ impl TryFrom<String> for Environment {
         match s.to_lowercase().as_str() {
             "local" => Ok(Self::Local),
             "production" => Ok(Self::Production),
+            "kovan" => Ok(Self::Kovan),
             _other => Err(format!("failed to parse {}", s)),
         }
     }

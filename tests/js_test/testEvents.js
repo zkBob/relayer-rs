@@ -32,10 +32,12 @@ Private Keys
 */
 var poolAbi = require('../../configuration/pool-abi.json')
 var Web3 = require('web3')
-const rpcUrl = "http://127.0.0.1:8545"
+// const rpcUrl = "http://127.0.0.1:8545"
+const rpcUrl = "https://kovan.infura.io/v3/9a94d181b23846209f01161dcd0f9ad6"
 const web3 = new Web3(rpcUrl)
 
-const poolContractAddress = '0xc89ce4735882c9f0f0fe26686c53074e09b0d550';
+const poolContractAddress = '0x21873d8fe216E5c0Eea4Ae948D9768b64f38e89b'; //kovan
+// const poolContractAddress = '0xc89ce4735882c9f0f0fe26686c53074e09b0d550'; //local
 
 const poolContract = new web3.eth.Contract(poolAbi, poolContractAddress)
 
@@ -43,12 +45,15 @@ let fromBlock = 0;
 
 let missedIndices = [1];
 
-poolContract.getPastEvents( 'Message', {
+poolContract.getPastEvents('Message', {
   fromBlock,
   filter: {
     // index: missedIndices
-  }
-}).then(events => console.log("events", events))
+  },
+
+}).then(events => console.log("events", events[0]
+// .filter(e => e.event === "Message")
+))
   .catch(err => console.error(err))
 
 

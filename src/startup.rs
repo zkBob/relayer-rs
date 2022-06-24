@@ -6,12 +6,18 @@ use crate::{
 
 use actix_web::{dev::Server, middleware, web, App, HttpServer};
 
+// use ethereum_jsonrpc::types::BlockNumber;
 use kvdb::KeyValueDB;
-use libzeropool::fawkes_crypto::{backend::bellman_groth16::{engines::Bn256, verifier}, ff_uint::Num};
+use libzeropool::fawkes_crypto::{
+    backend::bellman_groth16::{engines::Bn256, verifier}
+};
 use libzeropool_rs::merkle::MerkleTree;
-use web3::{types::{Bytes, H256, U256}, ethabi::TopicFilter};
+use web3::types::BlockNumber;
+use web3::{
+    types::{Bytes, LogWithMeta, H256, U256},
+};
 
-use std::{net::TcpListener, sync::Mutex, str::FromStr};
+use std::{net::TcpListener, sync::Mutex};
 use tokio::sync::mpsc::Sender;
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -83,7 +89,7 @@ impl Application {
 }
 
 type MessageEvent = (U256, H256, Bytes);
-type Events = Vec<MessageEvent>;
+type Events = Vec<LogWithMeta<MessageEvent>>;
 
 pub async fn sync_state<D: 'static + KeyValueDB>(
     finalized: MerkleTree<D, PoolBN256>,
@@ -91,14 +97,25 @@ pub async fn sync_state<D: 'static + KeyValueDB>(
     web3_settings: &Web3Settings,
 ) -> Result<(), SyncError> {
     // let finalized = db.lock().expect("failed to acquire lock");
-    let events = get_events(finalized, web3_settings).await?;
+    let events = get_events(
+        finalized,
+        web3_settings,
+        Some(BlockNumber::Earliest),
+        Some(BlockNumber::Latest),
+        None,
+    )
+    .await?;
 
     Ok(())
 }
+
 pub async fn get_events<D: 'static + KeyValueDB>(
     db: MerkleTree<D, PoolBN256>,
     web3_settings: &Web3Settings,
-) -> Result<Vec<MessageEvent>, SyncError> {
+    from_block: Option<BlockNumber>,
+    to_block: Option<BlockNumber>,
+    block_hash: Option<H256>,
+) -> Result<Events, SyncError> {
     let pool = Pool::new(web3_settings)?;
 
     let (contract_index, contract_root) = pool.root().await?;
@@ -110,16 +127,18 @@ pub async fn get_events<D: 'static + KeyValueDB>(
     tracing::debug!("local root {:#?}", local_root);
     tracing::debug!("contract root {:#?}", contract_root);
 
-    if !local_root.eq(&contract_root)  {
+    if !local_root.eq(&contract_root) {
         let missing_indices: Vec<u64> = (local_index..contract_index.as_u64())
             .into_iter()
             .map(|i| local_index + (i + 1) * (OUT as u64 + 1))
             .collect();
-            tracing::debug!("mising indices: {:?}", missing_indices);
+        tracing::debug!("mising indices: {:?}", missing_indices);
 
         //event Message(uint256 indexed index, bytes32 indexed hash, bytes message);
 
-        let result = pool.contract.events("Message", (), (), ()); //TODO: hide this under the hood?
+        let result = pool
+            .contract
+            .events("Message", from_block, to_block, block_hash,(), (), ()); //TODO: hide this under the hood?
 
         let events: Events = result.await?;
 

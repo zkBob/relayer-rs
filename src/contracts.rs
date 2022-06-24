@@ -1,10 +1,10 @@
-use std::{fs::File, io::BufReader, str::FromStr};
+use std::str::FromStr;
 
 use libzeropool::fawkes_crypto::{ff_uint::Num, engines::bn256::Fr};
 use web3::{
     contract::{Contract, Options},
     transports::Http,
-    types::{H160, U256}, ethabi::Uint,
+    types::{H160, U256},
 };
 
 use crate::{configuration::Web3Settings, startup::SyncError};
