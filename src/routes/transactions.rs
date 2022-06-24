@@ -13,8 +13,13 @@ use libzeropool::fawkes_crypto::{
     engines::bn256::Fr,
     ff_uint::Num,
 };
+use serde_json::from_str;
 use tokio::sync::mpsc::Sender;
 
+use crate::{
+    configuration::{ApplicationSettings, Web3Settings},
+    contracts::Pool,
+};
 #[derive(Debug)]
 pub enum ServiceError {
     BadRequest(String),
@@ -75,9 +80,10 @@ pub async fn transact(
     request: web::Json<Transaction>,
     sender: web::Data<Sender<TxRequest>>,
     vk: web::Data<VK<Bn256>>,
+    web3_settings: &Web3Settings,
+    application_settings: ApplicationSettings,
 ) -> Result<HttpResponse, ServiceError> {
     let transaction: Transaction = request.0.into();
-
     /*
     TODO:
     1. check nullifier for double spend
@@ -85,6 +91,19 @@ pub async fn transact(
     2. check fee >= relayer fee
 
     */
+    let nullifier = transaction.proof.inputs[1].to_string();
+    tracing::info!("Nullifier {:#?}", nullifier);
+    let pool = Pool::new(web3_settings).unwrap();
+    if !pool.check_nullifier(nullifier).await.unwrap() {
+        return Err(ServiceError::BadRequest(
+            "Double spending detected!".to_owned(),
+        ));
+    }
+
+    let fee = from_str::<u64>(&transaction.memo[0..8]).unwrap();
+    if fee <= application_settings.relayer_fee {
+        return Err(ServiceError::BadRequest("Fee too low!".to_owned()));
+    }
 
     // check proof validity
     if !verifier::verify(
