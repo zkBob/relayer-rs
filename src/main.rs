@@ -1,8 +1,8 @@
 use relayer_rs::{
     configuration::get_config,
     routes::transactions::TxRequest,
-    startup::run,
-    telemetry::{get_subscriber, init_subscriber},
+    startup::{run, sync_state},
+    telemetry::{get_subscriber, init_subscriber}, contracts::Pool,
 };
 
 use std::net::TcpListener;
@@ -42,6 +42,10 @@ async fn main() -> Result<(), std::io::Error> {
     let pending = Data::new(Mutex::new(pending));
     let finalized = Data::new(Mutex::new(finalized));
     let pending_clone = pending.clone();
+    let finalized_clone = finalized.clone();
+
+
+    sync_state(finalized_clone, configuration.web3).await.unwrap();
 
     tokio::spawn(async move {
         tracing::info!("starting receiver");

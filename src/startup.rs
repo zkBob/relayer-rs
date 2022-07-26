@@ -4,18 +4,19 @@ use crate::{
     routes::transactions::{query, transact, TxRequest},
 };
 
-use actix_web::{dev::Server, middleware, web, App, HttpServer};
+use actix_web::{
+    dev::Server,
+    middleware,
+    web::{self, Data},
+    App, HttpServer,
+};
 
 // use ethereum_jsonrpc::types::BlockNumber;
 use kvdb::KeyValueDB;
-use libzeropool::fawkes_crypto::{
-    backend::bellman_groth16::{engines::Bn256, verifier}
-};
+use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier};
 use libzeropool_rs::merkle::MerkleTree;
 use web3::types::BlockNumber;
-use web3::{
-    types::{Bytes, LogWithMeta, H256, U256},
-};
+use web3::types::{Bytes, LogWithMeta, H256, U256};
 
 use std::{net::TcpListener, sync::Mutex};
 use tokio::sync::mpsc::Sender;
@@ -92,14 +93,13 @@ type MessageEvent = (U256, H256, Bytes);
 type Events = Vec<LogWithMeta<MessageEvent>>;
 
 pub async fn sync_state<D: 'static + KeyValueDB>(
-    finalized: MerkleTree<D, PoolBN256>,
-    pending: MerkleTree<D, PoolBN256>,
-    web3_settings: &Web3Settings,
+    finalized: DB<D>,
+    web3_settings: Web3Settings,
 ) -> Result<(), SyncError> {
-    // let finalized = db.lock().expect("failed to acquire lock");
+    // let finalized = finalized.lock().expect("failed to acquire lock");
     let events = get_events(
         finalized,
-        web3_settings,
+        Data::new(web3_settings),
         Some(BlockNumber::Earliest),
         Some(BlockNumber::Latest),
         None,
@@ -110,8 +110,8 @@ pub async fn sync_state<D: 'static + KeyValueDB>(
 }
 
 pub async fn get_events<D: 'static + KeyValueDB>(
-    db: MerkleTree<D, PoolBN256>,
-    web3_settings: &Web3Settings,
+    db: DB<D>,
+    web3_settings: Data<Web3Settings>,
     from_block: Option<BlockNumber>,
     to_block: Option<BlockNumber>,
     block_hash: Option<H256>,
@@ -120,31 +120,47 @@ pub async fn get_events<D: 'static + KeyValueDB>(
 
     let (contract_index, contract_root) = pool.root().await?;
 
-    // let db = db.lock().expect("failed to acquire lock");
+    tracing::info!("contract root {:#?}", contract_root);
 
-    let local_root = db.get_root();
-    let local_index = db.next_index();
-    tracing::debug!("local root {:#?}", local_root);
-    tracing::debug!("contract root {:#?}", contract_root);
+    let db = db.lock().expect("failed to acquire lock");
 
-    if !local_root.eq(&contract_root) {
-        let missing_indices: Vec<u64> = (local_index..contract_index.as_u64())
-            .into_iter()
-            .map(|i| local_index + (i + 1) * (OUT as u64 + 1))
-            .collect();
-        tracing::debug!("mising indices: {:?}", missing_indices);
+    {
+        let local_root = db.get_root();
+        let local_index = db.next_index();
+        tracing::debug!("local root {:#?}", local_root);
+        tracing::debug!("contract root {:#?}", contract_root);
 
-        //event Message(uint256 indexed index, bytes32 indexed hash, bytes message);
+        if !local_root.eq(&contract_root) {
+            let missing_indices: Vec<u64> = (local_index..contract_index.as_u64())
+                .into_iter()
+                .map(|i| local_index + (i + 1) * (OUT as u64 + 1))
+                .collect();
+            tracing::debug!("mising indices: {:?}", missing_indices);
 
-        let result = pool
-            .contract
-            .events("Message", from_block, to_block, block_hash,(), (), ()); //TODO: hide this under the hood?
+            //event Message(uint256 indexed index, bytes32 indexed hash, bytes message);
 
-        let events: Events = result.await?;
+            let result =
+                pool.contract
+                    .events("Message", from_block, to_block, block_hash, (), (), ()); //TODO: hide this under the hood?
 
-        tracing::debug!("{:?}", events);
+            let events: Events = result.await?;
 
-        return Ok(events);
+            // tracing::debug!("{:?}", events);
+
+            for event in events.iter() {
+                if let Some(tx_hash) = event.transaction_hash {
+
+                    if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
+                    tracing::info!("got tx {:#?}", tx.input);
+                
+                    }
+                }
+            }
+
+            return Ok(events);
+        }
+
+
     }
 
     Ok(vec![])

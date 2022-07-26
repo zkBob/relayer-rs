@@ -80,8 +80,8 @@ pub async fn transact(
     request: web::Json<Transaction>,
     sender: web::Data<Sender<TxRequest>>,
     vk: web::Data<VK<Bn256>>,
-    web3_settings: &Web3Settings,
-    application_settings: ApplicationSettings,
+    web3_settings: web::Data<Web3Settings>,
+    application_settings: web::Data<ApplicationSettings>,
 ) -> Result<HttpResponse, ServiceError> {
     let transaction: Transaction = request.0.into();
     /*
@@ -94,7 +94,7 @@ pub async fn transact(
     let nullifier = transaction.proof.inputs[1].to_string();
     tracing::info!("Nullifier {:#?}", nullifier);
     let pool = Pool::new(web3_settings).unwrap();
-    if !pool.check_nullifier(nullifier).await.unwrap() {
+    if !pool.check_nullifier(&nullifier).await.unwrap() {
         return Err(ServiceError::BadRequest(
             "Double spending detected!".to_owned(),
         ));

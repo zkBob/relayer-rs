@@ -7,6 +7,7 @@ use libzeropool::POOL_PARAMS;
 use libzeropool_rs::merkle::MerkleTree;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
+use relayer_rs::contracts::Pool;
 use relayer_rs::routes::transactions::TxRequest;
 use relayer_rs::startup::Application;
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
@@ -17,6 +18,7 @@ pub struct TestApp {
     pub port: u16,
     pending: DB,
     pub finalized: DB,
+    pub pool: Pool
 }
 type DB = Data<Mutex<MerkleTree<InMemory, PoolBN256>>>;
 
@@ -56,6 +58,10 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
 
     let address = format!("http://127.0.0.1:{}", port);
 
+    let web3_config = config.web3.clone();
+
+    let pool = Pool::new(Data::new(web3_config)).expect("failed to initialize pool contract");
+
     tokio::spawn(async move {
         tracing::info!("starting receiver");
         while let Some(tx) = rx.recv().await {
@@ -71,5 +77,6 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
         port,
         pending: pending_clone,
         finalized: finalized_clone,
+        pool
     })
 }

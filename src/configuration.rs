@@ -14,6 +14,7 @@ pub struct ApplicationSettings {
     pub port: u16,
     pub tx: Tx,
     pub tree: Tree,
+    pub relayer_fee: u64
 }
 
 #[derive(Deserialize, Debug, Clone)]
