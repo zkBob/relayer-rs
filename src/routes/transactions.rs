@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use actix_http::StatusCode;
-use actix_web::{web, HttpResponse, ResponseError};
+use actix_web::{
+    web::{self, Data},
+    HttpResponse, ResponseError,
+};
+use kvdb::KeyValueDB;
 use serde::{Deserialize, Serialize};
 
 use libzeropool::fawkes_crypto::{
@@ -19,6 +23,7 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     configuration::{ApplicationSettings, Web3Settings},
     contracts::Pool,
+    startup::State,
 };
 #[derive(Debug)]
 pub enum ServiceError {
@@ -76,12 +81,12 @@ pub async fn query() -> Result<HttpResponse, ServiceError> {
     Ok(HttpResponse::Ok().finish())
 }
 
-pub async fn transact(
+pub async fn transact<D: KeyValueDB>(
     request: web::Json<Transaction>,
-    sender: web::Data<Sender<TxRequest>>,
-    vk: web::Data<VK<Bn256>>,
-    web3_settings: web::Data<Web3Settings>,
-    application_settings: web::Data<ApplicationSettings>,
+    state: Data<State<D>>, // sender: web::Data<Sender<TxRequest>>,
+                           // vk: web::Data<VK<Bn256>>,
+                           // web3_settings: web::Data<Web3Settings>,
+                           // application_settings: web::Data<ApplicationSettings>,
 ) -> Result<HttpResponse, ServiceError> {
     let transaction: Transaction = request.0.into();
     /*
@@ -92,22 +97,24 @@ pub async fn transact(
 
     */
     let nullifier = transaction.proof.inputs[1].to_string();
-    tracing::info!("Nullifier {:#?}", nullifier);
-    let pool = Pool::new(web3_settings).unwrap();
+    tracing::info!("Checking Nullifier {:#?}", nullifier);
+    let pool = &state.pool;
     if !pool.check_nullifier(&nullifier).await.unwrap() {
+
+        tracing::warn!("Nullifier {:#?} , Double spending detected", nullifier);
         return Err(ServiceError::BadRequest(
             "Double spending detected!".to_owned(),
         ));
     }
 
     let fee = from_str::<u64>(&transaction.memo[0..8]).unwrap();
-    if fee <= application_settings.relayer_fee {
+    if fee <= state.web3.relayer_fee {
         return Err(ServiceError::BadRequest("Fee too low!".to_owned()));
     }
 
     // check proof validity
     if !verifier::verify(
-        vk.as_ref(),
+        &state.vk,
         &transaction.proof.proof,
         &transaction.proof.inputs,
     ) {
@@ -121,7 +128,7 @@ pub async fn transact(
     //TODO:  3 calculate new virtual state root
 
     // send to channel for further processing
-    sender.send(copy).await.unwrap();
+    state.sender.send(copy).await.unwrap();
 
     //TODO:   4 generate UUID for request and save to in-memory map
 

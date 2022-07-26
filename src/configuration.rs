@@ -14,7 +14,7 @@ pub struct ApplicationSettings {
     pub port: u16,
     pub tx: Tx,
     pub tree: Tree,
-    pub relayer_fee: u64
+    
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -27,6 +27,7 @@ pub struct Web3Settings {
     pub provider_endpoint: String,
     pub abi_path: String,
     pub pool_address: String,
+    pub relayer_fee: u64,
     #[serde(skip_serializing)]
     pub credentials: Credentials
 }

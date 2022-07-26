@@ -1,11 +1,11 @@
 use relayer_rs::{
     configuration::get_config,
     routes::transactions::TxRequest,
-    startup::{run, sync_state},
-    telemetry::{get_subscriber, init_subscriber}, contracts::Pool,
+    startup::Application,
+    telemetry::{get_subscriber, init_subscriber},
 };
 
-use std::net::TcpListener;
+
 
 use libzeropool::POOL_PARAMS;
 use libzeropool_rs::merkle::MerkleTree;
@@ -23,13 +23,6 @@ async fn main() -> Result<(), std::io::Error> {
     ));
 
     let configuration = get_config().expect("failed to get configuration");
-    let address = format!(
-        "{}:{}",
-        configuration.application.host, configuration.application.port
-    );
-    let listener = TcpListener::bind(address)?;
-
-    let vk = configuration.application.get_tx_vk()?;
 
     let (sender, mut rx) = mpsc::channel::<TxRequest>(1000);
 
@@ -41,11 +34,16 @@ async fn main() -> Result<(), std::io::Error> {
 
     let pending = Data::new(Mutex::new(pending));
     let finalized = Data::new(Mutex::new(finalized));
-    let pending_clone = pending.clone();
-    let finalized_clone = finalized.clone();
+    
+    let app = Application::build(
+        configuration,
+        sender.clone(),
+        pending.clone(),
+        finalized.clone(),
+    )
+    .await?;
 
-
-    sync_state(finalized_clone, configuration.web3).await.unwrap();
+    app.state.sync().await.expect("failed to sync");
 
     tokio::spawn(async move {
         tracing::info!("starting receiver");
@@ -56,5 +54,6 @@ async fn main() -> Result<(), std::io::Error> {
         }
     });
 
-    run(listener, sender, vk, pending_clone, finalized.clone())?.await
+    app.run_untill_stopped().await
+
 }

@@ -5,8 +5,8 @@ application:
     vk: tests/data/params/tx_vk.json
   tree:
     params: ./data/params
-  relayer_fee: 0
 web3:
+  relayer_fee: 0
   provider_endpoint: http://localhost:8545
   pool_address: 0x
   abi_path: ../configuration/pool-abi.json

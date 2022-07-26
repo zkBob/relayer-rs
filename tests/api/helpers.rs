@@ -18,7 +18,7 @@ pub struct TestApp {
     pub port: u16,
     pending: DB,
     pub finalized: DB,
-    pub pool: Pool
+    // pub pool: Pool
 }
 type DB = Data<Mutex<MerkleTree<InMemory, PoolBN256>>>;
 
@@ -54,13 +54,11 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
 
     let app = Application::build(config.clone(), sender, pending, finalized).await?;
 
+    app.state.sync().await.expect("failed to sync state");
+
     let port = app.port();
 
     let address = format!("http://127.0.0.1:{}", port);
-
-    let web3_config = config.web3.clone();
-
-    let pool = Pool::new(Data::new(web3_config)).expect("failed to initialize pool contract");
 
     tokio::spawn(async move {
         tracing::info!("starting receiver");
@@ -77,6 +75,6 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
         port,
         pending: pending_clone,
         finalized: finalized_clone,
-        pool
+        // pool
     })
 }
