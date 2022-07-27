@@ -1,13 +1,17 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use actix_http::StatusCode;
 use actix_web::{
     web::{self, Data},
     HttpResponse, ResponseError,
 };
-use kvdb::KeyValueDB;
+use kvdb::{DBKey, DBTransaction, KeyValueDB};
 use serde::{Deserialize, Serialize};
 
+use kvdb::DBOp::Insert;
 use libzeropool::fawkes_crypto::{
     backend::bellman_groth16::{
         engines::Bn256,
@@ -20,11 +24,14 @@ use libzeropool::fawkes_crypto::{
 use serde_json::from_str;
 use tokio::sync::mpsc::Sender;
 
+use crate::startup::JobStatus;
+
 use crate::{
     configuration::{ApplicationSettings, Web3Settings},
     contracts::Pool,
-    startup::State,
+    startup::{Job, State},
 };
+use uuid::Uuid;
 #[derive(Debug)]
 pub enum ServiceError {
     BadRequest(String),
@@ -40,13 +47,19 @@ impl From<std::io::Error> for ServiceError {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
+    pub uuid: Option<String>,
     pub proof: Proof,
     pub memo: String,
     tx_type: String,
     deposit_signature: String,
 }
 
-pub type TxRequest = Arc<Transaction>;
+pub type TxRequest = Arc<Job>;
+
+#[derive(Serialize)]
+pub struct Response {
+    job_id: String,
+}
 
 impl core::fmt::Debug for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -89,30 +102,46 @@ pub async fn transact<D: KeyValueDB>(
                            // application_settings: web::Data<ApplicationSettings>,
 ) -> Result<HttpResponse, ServiceError> {
     let transaction: Transaction = request.0.into();
-    /*
-    TODO:
-    1. check nullifier for double spend
 
-    2. check fee >= relayer fee
+    let request_id = transaction
+        .uuid
+        .as_ref()
+        .map(|id| Uuid::parse_str(&id).unwrap())
+        .unwrap_or(Uuid::new_v4());
 
-    */
+    // 1. check nullifier for double spend
+
     let nullifier = transaction.proof.inputs[1].to_string();
-    tracing::info!("Checking Nullifier {:#?}", nullifier);
+    tracing::info!(
+        "request_id: {}, Checking Nullifier {:#?}",
+        request_id,
+        nullifier
+    );
     let pool = &state.pool;
     if !pool.check_nullifier(&nullifier).await.unwrap() {
-
-        tracing::warn!("Nullifier {:#?} , Double spending detected", nullifier);
-        return Err(ServiceError::BadRequest(
-            "Double spending detected!".to_owned(),
-        ));
+        let error_message = format!(
+            "request_id: {}, Nullifier {:#?} , Double spending detected",
+            request_id, nullifier
+        );
+        tracing::warn!("{}", error_message);
+        // return Err(ServiceError::BadRequest(error_message));
     }
 
-    let fee = from_str::<u64>(&transaction.memo[0..8]).unwrap();
-    if fee <= state.web3.relayer_fee {
-        return Err(ServiceError::BadRequest("Fee too low!".to_owned()));
-    }
+    // 2. check fee >= relayer fee TODO: parse memo properly
+
+    // let fee = from_str::<u64>(&transaction.memo[0..8]).unwrap();
+    // if fee <= state.web3.relayer_fee {
+    //     tracing::warn!(
+    //         "request_id: {}, Nullifier {:#?} , Double spending detected",
+    //         request_id,
+    //         nullifier
+    //     );
+    //     return Err(ServiceError::BadRequest("Fee too low!".to_owned()));
+    // }
 
     // check proof validity
+
+    // 3. Check proof
     if !verifier::verify(
         &state.vk,
         &transaction.proof.proof,
@@ -122,15 +151,32 @@ pub async fn transact<D: KeyValueDB>(
         return Err(ServiceError::BadRequest("Invalid proof".to_owned()));
     }
 
-    // this is actually Arc
-    let copy = Arc::new(transaction);
-
     //TODO:  3 calculate new virtual state root
 
     // send to channel for further processing
-    state.sender.send(copy).await.unwrap();
+    let created = SystemTime::now();
+    let job = Job {
+        created,
+        status: JobStatus::Created,
+        transaction,
+    };
+
+    let a = serde_json::to_string(&job).unwrap().as_bytes().to_vec();
+
+    state.jobs.write(DBTransaction {
+        ops: vec![Insert {
+            col: 0,
+            key: DBKey::from_vec(request_id.as_bytes().to_vec()),
+            value: a,
+        }],
+    })?;
+    state.sender.send(TxRequest::new(job)).await.unwrap();
 
     //TODO:   4 generate UUID for request and save to in-memory map
 
-    Ok(HttpResponse::Ok().finish())
+    let body = serde_json::to_string(&Response {
+        job_id: request_id.as_hyphenated().to_string(),
+    })
+    .unwrap();
+    Ok(HttpResponse::Ok().body(body))
 }

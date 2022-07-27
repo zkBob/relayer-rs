@@ -11,28 +11,47 @@ use actix_web::{
     App, HttpServer,
 };
 
+use borsh::{BorshSerialize, BorshDeserialize};
 // use ethereum_jsonrpc::types::BlockNumber;
 use kvdb::KeyValueDB;
+
+use kvdb_memorydb::InMemory as MemoryDatabase;
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{
     engines::Bn256,
     verifier::{self, VK},
 };
 use libzeropool_rs::merkle::MerkleTree;
+use serde::{Serialize, Deserialize};
 use web3::types::{Bytes, LogWithMeta, H256, U256};
 use web3::{futures::future::try_join_all, types::BlockNumber};
 
 use std::{
     convert::identity,
     net::TcpListener,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, collections::HashMap, time::{Instant, SystemTime},
 };
 use tokio::sync::mpsc::Sender;
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
 
+#[derive(Debug, Serialize, Deserialize)]
+pub enum JobStatus {
+    Created,
+    Proving,
+    Mining,
+    Done,
+    Rejected
+}
+#[derive(Debug,Serialize, Deserialize)]
+pub struct Job {
+    pub created: SystemTime,
+    pub status: JobStatus,
+    pub transaction: Transaction,
+}
 pub struct State<D: 'static + KeyValueDB> {
     pub web3: Data<Web3Settings>,
     pending: DB<D>,
+    pub jobs: Arc<MemoryDatabase>,
     finalized: DB<D>,
     pub vk: VK<Bn256>,
     pub pool: Pool,
@@ -129,9 +148,10 @@ impl<D: 'static + KeyValueDB> Application<D> {
         sender: Sender<TxRequest>,
         pending: DB<D>,
         finalized: DB<D>,
+        vk: Option<VK<Bn256>>
     ) -> Result<Self, std::io::Error> {
         tracing::info!("using config {:#?}", configuration);
-        let vk = configuration.application.get_tx_vk().unwrap();
+        let vk = vk.unwrap_or(configuration.application.get_tx_vk().unwrap());
         let host = configuration.application.host;
         let address = format!("{}:{}", host, configuration.application.port);
         let web3 = Data::new(configuration.web3);
@@ -142,14 +162,18 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let pool =
             Pool::new(web3.clone()).expect("failed to instantiate pool contract");
 
+        let jobs = Arc::new(kvdb_memorydb::create(2));
+
         let state = Data::new(State {
             pending,
             finalized,
             vk,
             pool,
+            jobs, 
             sender: Data::new(sender),
             web3
         });
+        
         let server = run(listener, state.clone())?;
 
         Ok(Self {
@@ -174,8 +198,6 @@ type MessageEvent = (U256, H256, Bytes);
 type Events = Vec<LogWithMeta<MessageEvent>>;
 
 pub async fn get_events(
-    // db: DB<D>,
-    // web3_settings: Data<Web3Settings>,
     from_block: Option<BlockNumber>,
     to_block: Option<BlockNumber>,
     block_hash: Option<H256>,
@@ -183,7 +205,7 @@ pub async fn get_events(
 ) -> Result<Events, SyncError> {
     let result = pool
         .contract
-        .events("Message", from_block, to_block, block_hash, (), (), ()); //TODO: hide this under the hood?
+        .events("Message", from_block, to_block, block_hash, (), (), ()); 
 
     let events: Events = result.await?;
 

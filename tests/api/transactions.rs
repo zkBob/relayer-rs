@@ -42,3 +42,22 @@ async fn post_transaction_works() {
     let result = handle.await.unwrap();
     assert_eq!(result, 200 as u16);
 }
+
+#[actix_rt::test]
+async fn gen_tx_and_send() {
+    let test_app = spawn_app().await.unwrap();
+
+    let tx = test_app.generator.generate_deposit().await.unwrap();
+
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(format!("{}/transact", test_app.address))
+        .body(serde_json::to_string(&tx).unwrap())
+        .header("Content-type", "application/json")
+        .send()
+        .await
+        .expect("failed to make request");
+
+        assert_eq!(response.status().as_u16(), 200 as u16);
+}

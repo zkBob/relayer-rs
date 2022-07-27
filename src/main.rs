@@ -5,14 +5,14 @@ use relayer_rs::{
     telemetry::{get_subscriber, init_subscriber},
 };
 
-
-
 use libzeropool::POOL_PARAMS;
 use libzeropool_rs::merkle::MerkleTree;
 use tokio::sync::mpsc;
 
 use actix_web::web::Data;
 use std::sync::Mutex;
+
+use kvdb_memorydb::InMemory as MemoryDatabase;
 
 #[actix_web::main]
 async fn main() -> Result<(), std::io::Error> {
@@ -34,12 +34,13 @@ async fn main() -> Result<(), std::io::Error> {
 
     let pending = Data::new(Mutex::new(pending));
     let finalized = Data::new(Mutex::new(finalized));
-    
+
     let app = Application::build(
         configuration,
         sender.clone(),
         pending.clone(),
         finalized.clone(),
+        None
     )
     .await?;
 
@@ -47,13 +48,14 @@ async fn main() -> Result<(), std::io::Error> {
 
     tokio::spawn(async move {
         tracing::info!("starting receiver");
-        while let Some(tx) = rx.recv().await {
+        while let Some(job) = rx.recv().await {
             let mut p = pending.lock().unwrap();
-            p.append_hash(tx.proof.inputs[2], false);
+            {
+                p.append_hash(job.transaction.proof.inputs[2], false);
+            }
             // tracing::info!("Merkle root {:#?}", p.get_root());
         }
     });
 
     app.run_untill_stopped().await
-
 }
