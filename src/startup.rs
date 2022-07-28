@@ -54,7 +54,7 @@ pub struct Job {
 }
 pub struct State<D: 'static + KeyValueDB> {
     pub web3: Data<Web3Settings>,
-    pending: DB<D>,
+    pub pending: DB<D>,
     pub jobs: Arc<MemoryDatabase>,
     finalized: DB<D>,
     pub vk: VK<Bn256>,
