@@ -1,10 +1,10 @@
 use std::str::FromStr;
 
-use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::Num};
+use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::{Num, NumRepr}};
 use web3::{
     contract::{Contract, Options},
     transports::Http,
-    types::{H256, H160, U256, TransactionId, Transaction},
+types::{Transaction, TransactionId, H160, H256, U256},
     Web3,
 };
 
@@ -24,12 +24,12 @@ fn get_web3(config: &Data<Web3Settings>) -> web3::Web3<Http> {
     web3::Web3::new(http)
 }
 
-
 impl Pool {
-
     pub async fn get_transaction(&self, tx_hash: H256) -> Result<Option<Transaction>, web3::Error> {
-
-        self.web3.eth().transaction(TransactionId::Hash(tx_hash)).await
+        self.web3
+            .eth()
+            .transaction(TransactionId::Hash(tx_hash))
+            .await
         // web3
     }
 
@@ -51,7 +51,18 @@ impl Pool {
     }
 
     pub async fn check_nullifier(&self, nullifier: &str) -> Result<bool, web3::error::Error> {
-        Ok(false)
+        let exists: U256= self
+            .contract
+            .query(
+                "nullifiers",
+                nullifier.to_owned(),
+                None,
+                Options::default(),
+                None,
+            )
+            .await
+            .expect("failed to check nullifier");
+        Ok(exists.is_zero())
     }
 
     pub async fn root(&self) -> Result<(U256, Num<Fr>), SyncError> {

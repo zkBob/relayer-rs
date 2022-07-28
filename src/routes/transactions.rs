@@ -121,7 +121,7 @@ pub async fn transact<D: KeyValueDB>(
     if !pool.check_nullifier(&nullifier).await.unwrap() {
         let error_message = format!(
             "request_id: {}, Nullifier {:#?} , Double spending detected",
-            request_id, nullifier
+            request_id, &nullifier
         );
         tracing::warn!("{}", error_message);
         // return Err(ServiceError::BadRequest(error_message));

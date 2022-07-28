@@ -33,12 +33,14 @@ secp256k1 = "0.21"
 ethabi = "17.1.0"
 kvdb-rocksdb = "0.11.0"
 env_logger = "0.9.0"
+memo-parser = {git = "https://github.com/zkBob/memo-parser" , branch="main"}
 [dependencies.uuid]
 version = "1.1.2"
 features = [
     "v4",                # Lets you generate random UUIDs
     "fast-rng",          # Use a faster (but still sufficiently random) RNG
 ]
+
 
 [dev-dependencies]
 hex = "0.4.3"
