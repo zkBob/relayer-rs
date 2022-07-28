@@ -1872,7 +1872,7 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 [[package]]
 name = "memo-parser"
 version = "0.2.0"
-source = "git+https://github.com/zkBob/memo-parser?branch=main#4b6a9e11f7c87e3acbdc01b8db364b3a51c8f554"
+source = "git+https://github.com/zkBob/memo-parser#4b6a9e11f7c87e3acbdc01b8db364b3a51c8f554"
 dependencies = [
  "chrono",
  "clap",
