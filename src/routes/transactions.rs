@@ -1,5 +1,5 @@
 use std::{
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -9,6 +9,7 @@ use actix_web::{
     HttpResponse, ResponseError,
 };
 use kvdb::{DBKey, DBTransaction, KeyValueDB};
+use kvdb_memorydb::InMemory;
 use serde::{Deserialize, Serialize};
 
 use kvdb::DBOp::Insert;
@@ -32,6 +33,8 @@ use crate::{
     startup::{Job, State},
 };
 use uuid::Uuid;
+use memo_parser::{self, memo::Memo, memo::TxType};
+extern crate hex;
 #[derive(Debug)]
 pub enum ServiceError {
     BadRequest(String),
@@ -124,20 +127,31 @@ pub async fn transact<D: KeyValueDB>(
             request_id, nullifier
         );
         tracing::warn!("{}", error_message);
-        // return Err(ServiceError::BadRequest(error_message));
+        return Err(ServiceError::BadRequest(error_message));
     }
 
     // 2. check fee >= relayer fee TODO: parse memo properly
 
-    // let fee = from_str::<u64>(&transaction.memo[0..8]).unwrap();
-    // if fee <= state.web3.relayer_fee {
-    //     tracing::warn!(
-    //         "request_id: {}, Nullifier {:#?} , Double spending detected",
-    //         request_id,
-    //         nullifier
-    //     );
-    //     return Err(ServiceError::BadRequest("Fee too low!".to_owned()));
-    // }
+    let tx_memo_bytes = hex::decode(&transaction.memo);
+    if tx_memo_bytes.is_err() {
+        return Err(ServiceError::BadRequest("Bad memo field!".to_owned()));
+    }
+    let tx_type = match transaction.tx_type.as_str() {
+        "0000" => TxType::Deposit,
+        "0001" => TxType::Transfer,
+        "0002" => TxType::Withdrawal,
+        "0003" => TxType::DepositPermittable,
+        _ => TxType::Deposit,
+    };
+    let parsed_memo = Memo::parse_memoblock(tx_memo_bytes.unwrap(), tx_type);
+    if parsed_memo.fee <= state.web3.relayer_fee {
+        tracing::warn!(
+            "request_id: {}, fee {:#?} , Fee too low!",
+            request_id,
+            parsed_memo.fee
+        );
+        return Err(ServiceError::BadRequest("Fee too low!".to_owned()));
+    }
 
     // check proof validity
 
@@ -152,6 +166,9 @@ pub async fn transact<D: KeyValueDB>(
     }
 
     //TODO:  3 calculate new virtual state root
+    let mut pending_tree = state.pending.lock().unwrap();
+    pending_tree.append_hash(transaction.proof.inputs[2], false);
+    let virtual_state_root = pending_tree.get_root();
 
     // send to channel for further processing
     let created = SystemTime::now();

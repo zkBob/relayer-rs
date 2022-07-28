@@ -51,7 +51,18 @@ impl Pool {
     }
 
     pub async fn check_nullifier(&self, nullifier: &str) -> Result<bool, web3::error::Error> {
-        Ok(false)
+        let exists: U256= self
+            .contract
+            .query(
+                "nullifiers",
+                nullifier.to_owned(),
+                None,
+                Options::default(),
+                None,
+            )
+            .await
+            .expect("failed to check nullifier");
+        Ok(exists.is_zero())
     }
 
     pub async fn root(&self) -> Result<(U256, Num<Fr>), SyncError> {
