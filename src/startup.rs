@@ -10,7 +10,7 @@ use actix_web::{
     web::{self, Data},
     App, HttpServer,
 };
-use memo_parser::memo;
+use memo_parser::memoparser::parse_calldata;
 // use ethereum_jsonrpc::types::BlockNumber;
 use kvdb::KeyValueDB;
 
@@ -104,6 +104,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                     //     memo::Memo::parse_memoblock(t.input, txtype)
                     // }
 
+                    /*
                     let markup: HashMap<CallDataField, (usize, usize)> = [
                         (CallDataField::Selector, (0, 4)),
                         (CallDataField::Nullifier, (4, 32)),
@@ -115,6 +116,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                     .iter()
                     .cloned()
                     .collect();
+                    */
 
                     for event in get_events(
                         Some(BlockNumber::Earliest),
@@ -135,6 +137,8 @@ impl<D: 'static + KeyValueDB> State<D> {
                             if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
                                 let calldata = tx.input.0;
 
+                                let parsed_calldata = parse_calldata(hex::encode(calldata), None).expect("Calldata is invalid!");
+                                /*
                                 let parser = PoolCalldataParser::new();
 
                                 let mut tx_type_bytes: [u8; 4] = [0; 4];
@@ -173,7 +177,7 @@ impl<D: 'static + KeyValueDB> State<D> {
 
                                 let memo = &calldata[*field_start_pos + tx_type_shift
                                     ..(*field_start_pos + memo_size)];
-
+                                    */
                                 finalized.add_hash(
                                     u64::try_from(
                                         index
@@ -181,7 +185,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                                             .unwrap(),
                                     )
                                     .unwrap(),
-                                    Num::try_from(out_commit).unwrap(), // TODO: deserialize out_commit
+                                    Num::try_from(u128::from_be_bytes(parsed_calldata.out_commit.try_into().unwrap())).unwrap(), // TODO: deserialize out_commit
                                     false,
                                 )
 
@@ -197,6 +201,7 @@ impl<D: 'static + KeyValueDB> State<D> {
     }
 }
 
+/*
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub enum CallDataField {
     Selector,
@@ -269,6 +274,7 @@ impl PoolCalldataParser {
     //         (memo, out_commit)
     //     }
 }
+*/
 
 pub struct Application<D: 'static + KeyValueDB> {
     // web3: Web3Settings,
