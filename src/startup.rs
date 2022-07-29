@@ -18,21 +18,19 @@ use kvdb_memorydb::InMemory as MemoryDatabase;
 use libzeropool::fawkes_crypto::{
     backend::bellman_groth16::{
         engines::Bn256,
-        verifier::{self, VK},
+        verifier::VK,
     },
-    ff_uint::Num,
+    ff_uint::{Num, NumRepr, Uint},
 };
 use libzeropool_rs::merkle::MerkleTree;
 use serde::{Deserialize, Serialize};
 use web3::types::{Bytes, LogWithMeta, H256, U256};
-use web3::{futures::future::try_join_all, types::BlockNumber};
+use web3::types::BlockNumber;
 
 use std::{
-    collections::HashMap,
-    convert::identity,
     net::TcpListener,
     sync::{Arc, Mutex},
-    time::{Instant, SystemTime},
+    time::SystemTime,
 };
 use tokio::sync::mpsc::Sender;
 
@@ -46,12 +44,14 @@ pub enum JobStatus {
     Done,
     Rejected,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Job {
     pub created: SystemTime,
     pub status: JobStatus,
     pub transaction: Transaction,
 }
+
 pub struct State<D: 'static + KeyValueDB> {
     pub web3: Data<Web3Settings>,
     pub pending: DB<D>,
@@ -61,6 +61,7 @@ pub struct State<D: 'static + KeyValueDB> {
     pub pool: Pool,
     pub sender: Data<Sender<TxRequest>>, // rx: Receiver<Transaction>,
 }
+
 impl<D: 'static + KeyValueDB> State<D> {
     pub async fn sync(&self) -> Result<(), SyncError> {
         let mut db = self.finalized.lock().expect("failed to acquire lock");
@@ -74,33 +75,11 @@ impl<D: 'static + KeyValueDB> State<D> {
             tracing::debug!("contract root {:#?}", contract_root);
 
             if !local_root.eq(&contract_root) {
-                let missing_indices: Vec<u64> = (local_index..contract_index.as_u64())
+                let missing_indices: Vec<u64> = (local_index..contract_index.as_u64()).step_by(128) // TODO: use const
                     .into_iter()
                     .map(|i| local_index + (i + 1) * (OUT as u64 + 1))
                     .collect();
                 tracing::debug!("mising indices: {:?}", missing_indices);
-
-                // let events = try_join_all(
-                //     get_events(
-                //         Some(BlockNumber::Earliest),
-                //         Some(BlockNumber::Latest),
-                //         None,
-                //         pool,
-                //     )
-                //     .await?
-                //     .iter()
-                //     .map(|event| event.transaction_hash)
-                //     .filter_map(identity)
-                //     .map(|tx_hash| pool.get_transaction(tx_hash)),
-                // )
-                // .await;
-
-                // let txs = events.unwrap().into_iter().filter_map(identity);
-                // .collect::<Vec<_>>();
-
-                // for t in txs {
-                //     memo::Memo::parse_memoblock(t.input, txtype)
-                // }
 
                 for event in get_events(
                     Some(BlockNumber::Earliest),
@@ -131,10 +110,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                                         .unwrap(),
                                 )
                                 .unwrap(),
-                                Num::try_from(u128::from_be_bytes(
-                                    parsed_calldata.out_commit.try_into().unwrap(),
-                                ))
-                                .unwrap(), // TODO: deserialize out_commit
+                                Num::from_uint_reduced(NumRepr(Uint::from_big_endian(&parsed_calldata.out_commit))), 
                                 false,
                             )
 
