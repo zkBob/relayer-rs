@@ -22,7 +22,7 @@ use libzeropool::fawkes_crypto::{
     },
     ff_uint::{Num, NumRepr, Uint},
 };
-use libzeropool_rs::merkle::MerkleTree;
+use libzkbob_rs::merkle::MerkleTree;
 use serde::{Deserialize, Serialize};
 use web3::types::{Bytes, LogWithMeta, H256, U256};
 use web3::types::BlockNumber;
@@ -71,8 +71,8 @@ impl<D: 'static + KeyValueDB> State<D> {
             let (contract_index, contract_root) = pool.root().await?;
             let local_root = db.get_root();
             let local_index = db.next_index();
-            tracing::debug!("local root {:#?}", local_root);
-            tracing::debug!("contract root {:#?}", contract_root);
+            tracing::debug!("local root {}", local_root.to_string());
+            tracing::debug!("contract root {}", contract_root.to_string());
 
             if !local_root.eq(&contract_root) {
                 let missing_indices: Vec<u64> = (local_index..contract_index.as_u64()).step_by(128) // TODO: use const
@@ -91,34 +91,28 @@ impl<D: 'static + KeyValueDB> State<D> {
                 .unwrap()
                 .iter()
                 {
-                    let index = event
-                        .event_data
-                        .0
-                        .checked_sub(U256::from(127 as i16))
-                        .unwrap(); // const index = Number(returnValues.index) - OUTPLUSONE ???
+                    let index = event.event_data.0 - 128;
                     if let Some(tx_hash) = event.transaction_hash {
                         if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
                             let calldata = tx.input.0;
-
-                            let parsed_calldata = parse_calldata(hex::encode(calldata), None)
+                            let calldata = parse_calldata(hex::encode(calldata), None)
                                 .expect("Calldata is invalid!");
                             
-                            db.add_hash(
-                                u64::try_from(
-                                    index
-                                        .checked_div(U256::from_dec_str("128").unwrap())
-                                        .unwrap(),
-                                )
-                                .unwrap(),
-                                Num::from_uint_reduced(NumRepr(Uint::from_big_endian(&parsed_calldata.out_commit))), 
-                                false,
-                            )
+                            let commit = Num::from_uint_reduced(NumRepr(Uint::from_big_endian(&calldata.out_commit)));
+                            tracing::debug!("index: {}, commit {}", index, commit.to_string());
+                            db.add_leafs_and_commitments(
+                                vec![], 
+                                vec![(index.as_u64(), commit)]
+                            );
+                            tracing::debug!("local root {:#?}", db.get_root().to_string());
 
                             //TODO: state.addTx(index, Buffer.from(commitAndMemo, 'hex'))
                         }
                     }
                 }
             }
+        
+            tracing::debug!("local root after sync {:#?}", db.get_root().to_string());
         }
 
         Ok(())

@@ -16,7 +16,7 @@ web3={git = "https://github.com/r0wdy1/rust-web3", branch = "logs_txhash" }
 tokio={version="1.17", features=["rt","rt-multi-thread","sync"]}
 libzeropool = { version = "0.5.3", default-features = false, features = ["in3out127"] }
 borsh = "0.9.1"
-libzeropool-rs = {version = "0.3.8", features = ["native"]}
+libzkbob-rs = {version = "0.5.0", features = ["native"]}
 tracing = { version = "0.1.29", features = ["log"] }
 tracing-futures = "0.2.5"
 tracing-subscriber = { version = "0.2.12", features = ["registry", "env-filter"] }

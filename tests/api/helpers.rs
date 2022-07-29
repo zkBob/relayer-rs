@@ -5,7 +5,7 @@ use kvdb_memorydb::InMemory;
 use libzeropool::fawkes_crypto::backend::bellman_groth16::engines::Bn256;
 use libzeropool::native::params::PoolBN256;
 use libzeropool::POOL_PARAMS;
-use libzeropool_rs::merkle::MerkleTree;
+use libzkbob_rs::merkle::MerkleTree;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::contracts::Pool;

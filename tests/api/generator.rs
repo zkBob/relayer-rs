@@ -13,9 +13,9 @@ use libzeropool::fawkes_crypto::backend::bellman_groth16::setup;
 // use libzeropool::fawkes_crypto::backend::bellman_groth16::{verifier::verify, Parameters};
 use libzeropool::fawkes_crypto::circuit::cs::CS;
 use libzeropool::POOL_PARAMS;
-use libzeropool_rs::proof::prove_tx;
+use libzkbob_rs::proof::prove_tx;
 
-use libzeropool_rs::client::{state::State, TxType, UserAccount};
+use libzkbob_rs::client::{state::State, TxType, UserAccount};
 use rand::Rng;
 
 use secp256k1::SecretKey;

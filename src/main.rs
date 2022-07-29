@@ -6,7 +6,7 @@ use relayer_rs::{
 };
 
 use libzeropool::POOL_PARAMS;
-use libzeropool_rs::merkle::MerkleTree;
+use libzkbob_rs::merkle::MerkleTree;
 use tokio::sync::mpsc;
 
 use actix_web::web::Data;
@@ -27,10 +27,10 @@ async fn main() -> Result<(), std::io::Error> {
     let (sender, mut rx) = mpsc::channel::<TxRequest>(1000);
 
     let pending =
-        MerkleTree::new_native(&Default::default(), "pending.db", POOL_PARAMS.clone()).unwrap();
+        MerkleTree::new_native(Default::default(), "pending.db", POOL_PARAMS.clone()).unwrap();
 
     let finalized =
-        MerkleTree::new_native(&Default::default(), "finalized.db", POOL_PARAMS.clone()).unwrap();
+        MerkleTree::new_native(Default::default(), "finalized.db", POOL_PARAMS.clone()).unwrap();
 
     let pending = Data::new(Mutex::new(pending));
     let finalized = Data::new(Mutex::new(finalized));

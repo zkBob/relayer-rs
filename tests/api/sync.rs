@@ -2,7 +2,7 @@ use actix_web::web::Data;
 use ethabi::ethereum_types::{Address, H256};
 use kvdb_memorydb::InMemory;
 use libzeropool::{native::params::PoolBN256, POOL_PARAMS};
-use libzeropool_rs::merkle::MerkleTree;
+use libzkbob_rs::merkle::MerkleTree;
 use relayer_rs::{
     configuration::get_config,
     contracts::Pool,
