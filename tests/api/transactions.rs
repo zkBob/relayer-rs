@@ -1,10 +1,10 @@
 use relayer_rs::routes::transactions::Transaction;
 
-use crate::helpers::spawn_app;
+use crate::{helpers::spawn_app, generator};
 
 #[actix_rt::test]
 async fn get_transactions_works() {
-    let app = spawn_app().await.unwrap();
+    let app = spawn_app(false).await.unwrap();
 
     let client = reqwest::Client::new();
 
@@ -18,7 +18,7 @@ async fn get_transactions_works() {
 async fn post_transaction_works() {
     use std::fs;
 
-    let app = spawn_app().await.unwrap();
+    let app = spawn_app(false).await.unwrap();
 
     let client = reqwest::Client::new();
 
@@ -45,9 +45,11 @@ async fn post_transaction_works() {
 
 #[actix_rt::test]
 async fn gen_tx_and_send() {
-    let test_app = spawn_app().await.unwrap();
+    let test_app = spawn_app(true).await.unwrap();
 
-    let tx = test_app.generator.generate_deposit().await.unwrap();
+    let generator = test_app.generator.unwrap();
+
+    let tx = generator.generate_deposit().await.unwrap();
 
     let client = reqwest::Client::new();
 

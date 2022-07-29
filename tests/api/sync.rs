@@ -14,11 +14,10 @@ use web3::types::BlockNumber;
 
 use crate::helpers::spawn_app;
 
-
 #[tokio::test]
 async fn test_sync() {
-    let app = spawn_app().await.unwrap();
-
+    
+    let app = spawn_app(false).await.unwrap();
 }
 
 #[tokio::test]
@@ -38,7 +37,6 @@ async fn test_get_events() {
 
     tracing::info!("events: {:#?}", events);
 }
-
 
 #[test]
 fn test_parse_memo() {

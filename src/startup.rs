@@ -63,7 +63,7 @@ pub struct State<D: 'static + KeyValueDB> {
 }
 impl<D: 'static + KeyValueDB> State<D> {
     pub async fn sync(&self) -> Result<(), SyncError> {
-        let db = self.finalized.lock().expect("failed to acquire lock");
+        let mut db = self.finalized.lock().expect("failed to acquire lock");
 
         {
             let pool = &self.pool;
@@ -73,124 +73,72 @@ impl<D: 'static + KeyValueDB> State<D> {
             tracing::debug!("local root {:#?}", local_root);
             tracing::debug!("contract root {:#?}", contract_root);
 
-            let mut finalized = self.finalized.lock().unwrap();
-            {
-                if !local_root.eq(&contract_root) {
-                    let missing_indices: Vec<u64> = (local_index..contract_index.as_u64())
-                        .into_iter()
-                        .map(|i| local_index + (i + 1) * (OUT as u64 + 1))
-                        .collect();
-                    tracing::debug!("mising indices: {:?}", missing_indices);
-
-                    // let events = try_join_all(
-                    //     get_events(
-                    //         Some(BlockNumber::Earliest),
-                    //         Some(BlockNumber::Latest),
-                    //         None,
-                    //         pool,
-                    //     )
-                    //     .await?
-                    //     .iter()
-                    //     .map(|event| event.transaction_hash)
-                    //     .filter_map(identity)
-                    //     .map(|tx_hash| pool.get_transaction(tx_hash)),
-                    // )
-                    // .await;
-
-                    // let txs = events.unwrap().into_iter().filter_map(identity);
-                    // .collect::<Vec<_>>();
-
-                    // for t in txs {
-                    //     memo::Memo::parse_memoblock(t.input, txtype)
-                    // }
-
-                    /*
-                    let markup: HashMap<CallDataField, (usize, usize)> = [
-                        (CallDataField::Selector, (0, 4)),
-                        (CallDataField::Nullifier, (4, 32)),
-                        (CallDataField::OutCommit, (36, 32)),
-                        (CallDataField::TxType, (640, 2)),
-                        (CallDataField::MemoSize, (642, 2)),
-                        (CallDataField::Memo, (644, 0)),
-                    ]
-                    .iter()
-                    .cloned()
+            if !local_root.eq(&contract_root) {
+                let missing_indices: Vec<u64> = (local_index..contract_index.as_u64())
+                    .into_iter()
+                    .map(|i| local_index + (i + 1) * (OUT as u64 + 1))
                     .collect();
-                    */
+                tracing::debug!("mising indices: {:?}", missing_indices);
 
-                    for event in get_events(
-                        Some(BlockNumber::Earliest),
-                        Some(BlockNumber::Latest),
-                        None,
-                        pool,
-                    )
-                    .await
-                    .unwrap()
-                    .iter()
-                    {
-                        let index = event
-                            .event_data
-                            .0
-                            .checked_sub(U256::from(127 as i16))
-                            .unwrap(); // const index = Number(returnValues.index) - OUTPLUSONE ???
-                        if let Some(tx_hash) = event.transaction_hash {
-                            if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
-                                let calldata = tx.input.0;
+                // let events = try_join_all(
+                //     get_events(
+                //         Some(BlockNumber::Earliest),
+                //         Some(BlockNumber::Latest),
+                //         None,
+                //         pool,
+                //     )
+                //     .await?
+                //     .iter()
+                //     .map(|event| event.transaction_hash)
+                //     .filter_map(identity)
+                //     .map(|tx_hash| pool.get_transaction(tx_hash)),
+                // )
+                // .await;
 
-                                let parsed_calldata = parse_calldata(hex::encode(calldata), None).expect("Calldata is invalid!");
-                                /*
-                                let parser = PoolCalldataParser::new();
+                // let txs = events.unwrap().into_iter().filter_map(identity);
+                // .collect::<Vec<_>>();
 
-                                let mut tx_type_bytes: [u8; 4] = [0; 4];
-                                let (field_start_pos, field_len) =
-                                    markup.get(&CallDataField::TxType).unwrap();
-                                tx_type_bytes.copy_from_slice(
-                                    &calldata[*field_start_pos..(*field_start_pos + *field_len)],
-                                );
-                                let tx_type = u32::from_be_bytes(tx_type_bytes);
+                // for t in txs {
+                //     memo::Memo::parse_memoblock(t.input, txtype)
+                // }
 
-                                let mut out_commit_bytes: [u8; 16] = [0; 16];
-                                let (field_start_pos, field_len) =
-                                    markup.get(&CallDataField::OutCommit).unwrap();
-                                out_commit_bytes.copy_from_slice(
-                                    &calldata[*field_start_pos..(*field_start_pos + *field_len)],
-                                );
-                                let out_commit = u128::from_be_bytes(out_commit_bytes);
+                for event in get_events(
+                    Some(BlockNumber::Earliest),
+                    Some(BlockNumber::Latest),
+                    None,
+                    pool,
+                )
+                .await
+                .unwrap()
+                .iter()
+                {
+                    let index = event
+                        .event_data
+                        .0
+                        .checked_sub(U256::from(127 as i16))
+                        .unwrap(); // const index = Number(returnValues.index) - OUTPLUSONE ???
+                    if let Some(tx_hash) = event.transaction_hash {
+                        if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
+                            let calldata = tx.input.0;
 
-                                let mut memo_size_bytes: [u8; 8] = [0; 8];
-                                let (field_start_pos, field_len) =
-                                    markup.get(&CallDataField::MemoSize).unwrap();
-                                memo_size_bytes.copy_from_slice(
-                                    &calldata[*field_start_pos..(*field_start_pos + *field_len)],
-                                );
-                                let memo_size = usize::from_be_bytes(memo_size_bytes);
-
-                                let (field_start_pos, _) =
-                                    markup.get(&CallDataField::Memo).unwrap();
-
-                                let tx_type_shift: usize = match memo::TxType::from_u32(tx_type) {
-                                    memo::TxType::Deposit | memo::TxType::Transfer => 16,
-                                    memo::TxType::Withdrawal | memo::TxType::DepositPermittable => {
-                                        72
-                                    }
-                                };
-
-                                let memo = &calldata[*field_start_pos + tx_type_shift
-                                    ..(*field_start_pos + memo_size)];
-                                    */
-                                finalized.add_hash(
-                                    u64::try_from(
-                                        index
-                                            .checked_div(U256::from_dec_str("128").unwrap())
-                                            .unwrap(),
-                                    )
-                                    .unwrap(),
-                                    Num::try_from(u128::from_be_bytes(parsed_calldata.out_commit.try_into().unwrap())).unwrap(), // TODO: deserialize out_commit
-                                    false,
+                            let parsed_calldata = parse_calldata(hex::encode(calldata), None)
+                                .expect("Calldata is invalid!");
+                            
+                            db.add_hash(
+                                u64::try_from(
+                                    index
+                                        .checked_div(U256::from_dec_str("128").unwrap())
+                                        .unwrap(),
                                 )
+                                .unwrap(),
+                                Num::try_from(u128::from_be_bytes(
+                                    parsed_calldata.out_commit.try_into().unwrap(),
+                                ))
+                                .unwrap(), // TODO: deserialize out_commit
+                                false,
+                            )
 
-                                //TODO: state.addTx(index, Buffer.from(commitAndMemo, 'hex'))
-                            }
+                            //TODO: state.addTx(index, Buffer.from(commitAndMemo, 'hex'))
                         }
                     }
                 }
@@ -201,80 +149,6 @@ impl<D: 'static + KeyValueDB> State<D> {
     }
 }
 
-/*
-#[derive(Clone, Hash, PartialEq, Eq)]
-pub enum CallDataField {
-    Selector,
-    Nullifier,
-    OutCommit,
-    TxType,
-    MemoSize,
-    Memo,
-}
-struct PoolCalldataParser {
-    // pub calldata: Bytes,
-    markup: HashMap<CallDataField, (usize, usize)>,
-}
-
-static SELECTOR_POS: (usize, usize) = (0, 4);
-impl PoolCalldataParser {
-    fn new() -> Self {
-        let markup: HashMap<CallDataField, (usize, usize)> = [
-            (CallDataField::Selector, SELECTOR_POS),
-            (CallDataField::Nullifier, (4, 32)),
-            (CallDataField::OutCommit, (36, 32)),
-            (CallDataField::TxType, (640, 2)),
-            (CallDataField::MemoSize, (642, 2)),
-            (CallDataField::Memo, (644, 0)),
-        ]
-        .iter()
-        .cloned()
-        .collect();
-
-        Self { markup }
-    }
-    // fn get_field(&self, field_name: CallDataField) -> Result<Vec<u8>, SyncError> {
-
-    // match self.markup.get(&field_name)   {
-    //     Some((start, len)) => {
-
-    //         let result = [0;len]; // Doesn't compile
-    //         Ok(vec![])
-
-    //     },
-    //     None => Err( SyncError::GeneralError("Bad calldata ".to_string()))
-    // }
-
-    // }
-    //     fn parse(&self, calldata: Vec<u8>) -> (&[u8], U256) {
-    //         tracing::info!("got calldata {:#?}", calldata);
-    //         let markup = &self.markup;
-    //         let mut tx_type_bytes: [u8; 4] = [0; 4];
-    //         let (field_start_pos, field_len) = markup.get(&CallDataField::TxType).unwrap();
-    //         tx_type_bytes.copy_from_slice(&calldata[*field_start_pos..(*field_start_pos + *field_len)]);
-    //         let tx_type = u32::from_be_bytes(tx_type_bytes);
-
-    //         let mut out_commit_bytes: [u8; 32] = [0; 32];
-    //         let (field_start_pos, field_len) = markup.get(&CallDataField::OutCommit).unwrap();
-    //         let out_commit =
-    //             U256::from_big_endian(&calldata[*field_start_pos..(*field_start_pos + *field_len)]);
-
-    //         let mut memo_size_bytes: [u8; 8] = [0; 8];
-    //         let (field_start_pos, field_len) = markup.get(&CallDataField::MemoSize).unwrap();
-    //         memo_size_bytes
-    //             .copy_from_slice(&calldata[*field_start_pos..(*field_start_pos + *field_len)]);
-    //         let memo_size = usize::from_be_bytes(memo_size_bytes);
-
-    //         // let memo_bytes = [0;memo_size];
-
-    //         let (field_start_pos, _) = markup.get(&CallDataField::Memo).unwrap();
-
-    //         let memo = &calldata[*field_start_pos..(*field_start_pos + memo_size)];
-
-    //         (memo, out_commit)
-    //     }
-}
-*/
 
 pub struct Application<D: 'static + KeyValueDB> {
     // web3: Web3Settings,

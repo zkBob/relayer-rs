@@ -2,6 +2,7 @@ use std::sync::Mutex;
 
 use actix_web::web::Data;
 use kvdb_memorydb::InMemory;
+use libzeropool::fawkes_crypto::backend::bellman_groth16::engines::Bn256;
 use libzeropool::native::params::PoolBN256;
 use libzeropool::POOL_PARAMS;
 use libzeropool_rs::merkle::MerkleTree;
@@ -20,8 +21,7 @@ pub struct TestApp {
     pub port: u16,
     pending: DB,
     pub finalized: DB,
-    pub generator: Generator
-    // pub pool: Pool
+    pub generator: Option<Generator>, // pub pool: Pool
 }
 type DB = Data<Mutex<MerkleTree<InMemory, PoolBN256>>>;
 
@@ -37,7 +37,7 @@ static TRACING: Lazy<()> = Lazy::new(|| {
     }
 });
 
-pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
+pub async fn spawn_app(setup: bool) -> Result<TestApp, std::io::Error> {
     Lazy::force(&TRACING);
     let config: Settings = {
         let mut c = get_config().expect("failed to get config");
@@ -45,9 +45,16 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
         c
     };
 
-    let generator = crate::generator::Generator::new(
-        "6cbed15c793ce57650b9877cf6fa156fbef513c4e6134f022a85b1ffdd59b2a1",
-    );
+    let mut generator: Option<Generator> = None;
+
+    if setup {
+        tracing::info!("Generating cicuit params for the app, don't forget to add --release, otjerwise it would be a loooooong wait");
+        generator = Some(Generator::new(
+            "6cbed15c793ce57650b9877cf6fa156fbef513c4e6134f022a85b1ffdd59b2a1", //TODO: move to config
+        ));
+    } else {
+        tracing::info!("Using pre-built cicuit params specified in the configuration file");
+    }
 
     let (sender, mut rx) = mpsc::channel::<TxRequest>(1000);
 
@@ -64,7 +71,7 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
         sender,
         pending,
         finalized,
-        Some(generator.tx_params.get_vk()),
+        generator.as_ref().map(|g| g.tx_params.get_vk()),
     )
     .await?;
 
@@ -75,7 +82,7 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
     let address = format!("http://127.0.0.1:{}", port);
 
     tokio::spawn(async move {
-        tracing::info!("starting receiver");
+        tracing::info!("starting Receiver for Jobs channel");
         while let Some(job) = rx.recv().await {
             tracing::info!("Received tx {:#?}", job.transaction.memo);
         }
@@ -89,7 +96,6 @@ pub async fn spawn_app() -> Result<TestApp, std::io::Error> {
         port,
         pending: pending_clone,
         finalized: finalized_clone,
-        generator
-        // pool
+        generator,
     })
 }
