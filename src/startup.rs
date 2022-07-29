@@ -1,7 +1,7 @@
 use crate::{
     configuration::{Settings, Web3Settings},
     contracts::Pool,
-    routes::transactions::{query, transact, Transaction, TxRequest},
+    routes::transactions::{query, transact, TransactionRequest},
 };
 
 use actix_web::{
@@ -13,19 +13,17 @@ use actix_web::{
 use memo_parser::memoparser::parse_calldata;
 // use ethereum_jsonrpc::types::BlockNumber;
 use kvdb::KeyValueDB;
+use kvdb::{DBOp::Insert, DBTransaction};
 
 use kvdb_memorydb::InMemory as MemoryDatabase;
 use libzeropool::fawkes_crypto::{
-    backend::bellman_groth16::{
-        engines::Bn256,
-        verifier::VK,
-    },
+    backend::bellman_groth16::{engines::Bn256, verifier::VK},
     ff_uint::{Num, NumRepr, Uint},
 };
 use libzkbob_rs::merkle::MerkleTree;
 use serde::{Deserialize, Serialize};
+use web3::types::{BlockNumber, Transaction as Web3Transaction};
 use web3::types::{Bytes, LogWithMeta, H256, U256};
-use web3::types::BlockNumber;
 
 use std::{
     net::TcpListener,
@@ -49,17 +47,18 @@ pub enum JobStatus {
 pub struct Job {
     pub created: SystemTime,
     pub status: JobStatus,
-    pub transaction: Transaction,
+    pub transaction_request: Option<TransactionRequest>,
+    pub transaction: Option<Web3Transaction>,
 }
 
 pub struct State<D: 'static + KeyValueDB> {
     pub web3: Data<Web3Settings>,
     pub pending: DB<D>,
-    pub jobs: Arc<MemoryDatabase>,
+    pub jobs: Data<D>,
     finalized: DB<D>,
     pub vk: VK<Bn256>,
     pub pool: Pool,
-    pub sender: Data<Sender<TxRequest>>, // rx: Receiver<Transaction>,
+    pub sender: Data<Sender<Data<Job>>>, // rx: Receiver<Transaction>,
 }
 
 impl<D: 'static + KeyValueDB> State<D> {
@@ -75,7 +74,8 @@ impl<D: 'static + KeyValueDB> State<D> {
             tracing::debug!("contract root {}", contract_root.to_string());
 
             if !local_root.eq(&contract_root) {
-                let missing_indices: Vec<u64> = (local_index..contract_index.as_u64()).step_by(128) // TODO: use const
+                let missing_indices: Vec<u64> = (local_index..contract_index.as_u64())
+                    .step_by(128) // TODO: use const
                     .into_iter()
                     .map(|i| local_index + (i + 1) * (OUT as u64 + 1))
                     .collect();
@@ -94,31 +94,46 @@ impl<D: 'static + KeyValueDB> State<D> {
                     let index = event.event_data.0 - 128;
                     if let Some(tx_hash) = event.transaction_hash {
                         if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
-                            let calldata = tx.input.0;
+                            let calldata = &tx.input.0;
                             let calldata = parse_calldata(hex::encode(calldata), None)
                                 .expect("Calldata is invalid!");
-                            
-                            let commit = Num::from_uint_reduced(NumRepr(Uint::from_big_endian(&calldata.out_commit)));
+
+                            let commit = Num::from_uint_reduced(NumRepr(Uint::from_big_endian(
+                                &calldata.out_commit,
+                            )));
                             tracing::debug!("index: {}, commit {}", index, commit.to_string());
-                            db.add_leafs_and_commitments(
-                                vec![], 
-                                vec![(index.as_u64(), commit)]
-                            );
+                            db.add_leafs_and_commitments(vec![], vec![(index.as_u64(), commit)]);
                             tracing::debug!("local root {:#?}", db.get_root().to_string());
+
+                            use kvdb::DBKey;
+
+                            let job = Job {
+                                created: SystemTime::now(),
+                                status: JobStatus::Done,
+                                transaction_request: None,
+                                transaction: Some(tx),
+                            };
+                            let db_transaction = DBTransaction {
+                                ops: vec![Insert {
+                                    col: 0,
+                                    key: DBKey::from_vec(vec![1]),
+                                    value: serde_json::to_vec(&job).unwrap(),
+                                }],
+                            };
+                            self.jobs.write(db_transaction)?;
 
                             //TODO: state.addTx(index, Buffer.from(commitAndMemo, 'hex'))
                         }
                     }
                 }
             }
-        
+
             tracing::debug!("local root after sync {:#?}", db.get_root().to_string());
         }
 
         Ok(())
     }
 }
-
 
 pub struct Application<D: 'static + KeyValueDB> {
     // web3: Web3Settings,
@@ -155,9 +170,10 @@ impl From<web3::contract::Error> for SyncError {
 impl<D: 'static + KeyValueDB> Application<D> {
     pub async fn build(
         configuration: Settings,
-        sender: Sender<TxRequest>,
+        sender: Sender<Data<Job>>,
         pending: DB<D>,
         finalized: DB<D>,
+        jobs: Data<D>, //We don't realy need a mutex, since all jobs/tx are processed independently
         vk: Option<VK<Bn256>>,
     ) -> Result<Self, std::io::Error> {
         tracing::info!("using config {:#?}", configuration);
@@ -170,8 +186,6 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let port = listener.local_addr().unwrap().port();
 
         let pool = Pool::new(web3.clone()).expect("failed to instantiate pool contract");
-
-        let jobs = Arc::new(kvdb_memorydb::create(2));
 
         let state = Data::new(State {
             pending,

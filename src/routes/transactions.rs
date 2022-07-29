@@ -49,7 +49,7 @@ impl From<std::io::Error> for ServiceError {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Transaction {
+pub struct TransactionRequest {
     pub uuid: Option<String>,
     pub proof: Proof,
     pub memo: String,
@@ -57,14 +57,13 @@ pub struct Transaction {
     deposit_signature: String,
 }
 
-pub type TxRequest = Arc<Job>;
 
 #[derive(Serialize)]
 pub struct Response {
     job_id: String,
 }
 
-impl core::fmt::Debug for Transaction {
+impl core::fmt::Debug for TransactionRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Transaction")
             .field("memo", &self.memo)
@@ -98,15 +97,15 @@ pub async fn query() -> Result<HttpResponse, ServiceError> {
 }
 
 pub async fn transact<D: KeyValueDB>(
-    request: web::Json<Transaction>,
-    state: Data<State<D>>, // sender: web::Data<Sender<TxRequest>>,
+    request: web::Json<TransactionRequest>,
+    state: Data<State<D>>, // sender: web::Data<Sender<Data<Job>>>,
                            // vk: web::Data<VK<Bn256>>,
                            // web3_settings: web::Data<Web3Settings>,
                            // application_settings: web::Data<ApplicationSettings>,
 ) -> Result<HttpResponse, ServiceError> {
-    let transaction: Transaction = request.0.into();
+    let transaction_request: TransactionRequest = request.0.into();
 
-    let request_id = transaction
+    let request_id = transaction_request
         .uuid
         .as_ref()
         .map(|id| Uuid::parse_str(&id).unwrap())
@@ -114,7 +113,7 @@ pub async fn transact<D: KeyValueDB>(
 
     // 1. check nullifier for double spend
 
-    let nullifier = transaction.proof.inputs[1].to_string();
+    let nullifier = transaction_request.proof.inputs[1].to_string();
     tracing::info!(
         "request_id: {}, Checking Nullifier {:#?}",
         request_id,
@@ -132,11 +131,11 @@ pub async fn transact<D: KeyValueDB>(
 
     // 2. check fee >= relayer fee TODO: parse memo properly
 
-    let tx_memo_bytes = hex::decode(&transaction.memo);
+    let tx_memo_bytes = hex::decode(&transaction_request.memo);
     if tx_memo_bytes.is_err() {
         return Err(ServiceError::BadRequest("Bad memo field!".to_owned()));
     }
-    let tx_type = match transaction.tx_type.as_str() {
+    let tx_type = match transaction_request.tx_type.as_str() {
         "0000" => TxType::Deposit,
         "0001" => TxType::Transfer,
         "0002" => TxType::Withdrawal,
@@ -158,8 +157,8 @@ pub async fn transact<D: KeyValueDB>(
     // 3. Check proof
     if !verifier::verify(
         &state.vk,
-        &transaction.proof.proof,
-        &transaction.proof.inputs,
+        &transaction_request.proof.proof,
+        &transaction_request.proof.inputs,
     ) {
         tracing::info!("received bad proof");
         return Err(ServiceError::BadRequest("Invalid proof".to_owned()));
@@ -167,7 +166,7 @@ pub async fn transact<D: KeyValueDB>(
 
     //TODO:  3 calculate new virtual state root
     let mut pending_tree = state.pending.lock().unwrap();
-    pending_tree.append_hash(transaction.proof.inputs[2], false);
+    pending_tree.append_hash(transaction_request.proof.inputs[2], false);
     let virtual_state_root = pending_tree.get_root();
 
     // send to channel for further processing
@@ -175,19 +174,18 @@ pub async fn transact<D: KeyValueDB>(
     let job = Job {
         created,
         status: JobStatus::Created,
-        transaction,
+        transaction_request: Some(transaction_request),
+        transaction: None
     };
-
-    let a = serde_json::to_string(&job).unwrap().as_bytes().to_vec();
 
     state.jobs.write(DBTransaction {
         ops: vec![Insert {
             col: 0,
             key: DBKey::from_vec(request_id.as_bytes().to_vec()),
-            value: a,
+            value: serde_json::to_string(&job).unwrap().as_bytes().to_vec(),
         }],
     })?;
-    state.sender.send(TxRequest::new(job)).await.unwrap();
+    state.sender.send(Data::new(job)).await.unwrap();
 
     //TODO:   4 generate UUID for request and save to in-memory map
 

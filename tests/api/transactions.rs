@@ -1,4 +1,6 @@
-use relayer_rs::routes::transactions::Transaction;
+
+
+use relayer_rs::routes::transactions::TransactionRequest;
 
 use crate::helpers::spawn_app;
 
@@ -23,7 +25,7 @@ async fn post_transaction_works() {
     let client = reqwest::Client::new();
 
     let file = fs::File::open("tests/data/transaction.json").unwrap();
-    let tx: Transaction = serde_json::from_reader(file).unwrap();
+    let tx: TransactionRequest = serde_json::from_reader(file).unwrap();
 
     tracing::info!("sending request {:#?}", tx);
 

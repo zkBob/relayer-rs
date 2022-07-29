@@ -9,8 +9,7 @@ use libzkbob_rs::merkle::MerkleTree;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::contracts::Pool;
-use relayer_rs::routes::transactions::TxRequest;
-use relayer_rs::startup::Application;
+use relayer_rs::startup::{Application, Job};
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
 use tokio::sync::mpsc;
 
@@ -56,11 +55,13 @@ pub async fn spawn_app(setup: bool) -> Result<TestApp, std::io::Error> {
         tracing::info!("Using pre-built cicuit params specified in the configuration file");
     }
 
-    let (sender, mut rx) = mpsc::channel::<TxRequest>(1000);
+    let (sender, mut rx) = mpsc::channel::<Data<Job>>(1000);
 
     let pending = Data::new(Mutex::new(MerkleTree::new_test(POOL_PARAMS.clone())));
 
     let finalized = Data::new(Mutex::new(MerkleTree::new_test(POOL_PARAMS.clone())));
+
+    let jobs = Data::new(kvdb_memorydb::create(2));
 
     let pending_clone = pending.clone();
 
@@ -71,6 +72,7 @@ pub async fn spawn_app(setup: bool) -> Result<TestApp, std::io::Error> {
         sender,
         pending,
         finalized,
+        jobs,
         generator.as_ref().map(|g| g.tx_params.get_vk()),
     )
     .await?;
@@ -84,7 +86,11 @@ pub async fn spawn_app(setup: bool) -> Result<TestApp, std::io::Error> {
     tokio::spawn(async move {
         tracing::info!("starting Receiver for Jobs channel");
         while let Some(job) = rx.recv().await {
-            tracing::info!("Received tx {:#?}", job.transaction.memo);
+            
+            if let Some(transaction_request) = job.transaction_request.as_ref() {
+                tracing::info!("Received tx {:#?}", transaction_request.memo); 
+            }
+            
         }
     });
 
