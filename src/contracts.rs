@@ -55,7 +55,7 @@ impl Pool {
             .contract
             .query(
                 "nullifiers",
-                nullifier.to_owned(),
+                (U256::from_dec_str(nullifier).unwrap(),),
                 None,
                 Options::default(),
                 None,

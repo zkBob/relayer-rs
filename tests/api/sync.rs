@@ -18,6 +18,16 @@ use crate::helpers::spawn_app;
 async fn test_sync() {
     
     let app = spawn_app(false).await.unwrap();
+
+    // let generator = app.generator.expect("setup was not completed, rerun spawn_app with setup = true");
+
+    /*  TODO: 
+    1. call anvil contract
+    2. check new root against predefined value
+    3. check tx list
+
+    */
+
 }
 
 #[tokio::test]

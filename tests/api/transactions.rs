@@ -1,6 +1,6 @@
 use relayer_rs::routes::transactions::Transaction;
 
-use crate::{helpers::spawn_app, generator};
+use crate::helpers::spawn_app;
 
 #[actix_rt::test]
 async fn get_transactions_works() {
@@ -27,19 +27,15 @@ async fn post_transaction_works() {
 
     tracing::info!("sending request {:#?}", tx);
 
-    let handle = tokio::spawn(async move {
-        let response = client
-            .post(format!("{}/transact", app.address))
-            .body(serde_json::to_string(&tx).unwrap())
-            .header("Content-type", "application/json")
-            .send()
-            .await
-            .expect("failed to make request");
-
-        response.status().as_u16()
-    });
-
-    let result = handle.await.unwrap();
+    let result = client
+        .post(format!("{}/transact", app.address))
+        .body(serde_json::to_string(&tx).unwrap())
+        .header("Content-type", "application/json")
+        .send()
+        .await
+        .expect("failed to make request")
+        .status()
+        .as_u16();
     assert_eq!(result, 200 as u16);
 }
 
@@ -61,5 +57,5 @@ async fn gen_tx_and_send() {
         .await
         .expect("failed to make request");
 
-        assert_eq!(response.status().as_u16(), 200 as u16);
+    assert_eq!(response.status().as_u16(), 200 as u16);
 }
