@@ -2,7 +2,9 @@ application:
   host: 127.0.0.1
   port: 8000
   tx:
-    vk: tests/data/params/tx_vk.json
+    vk: tests/data/params/transfer_verification_key.json
+    params: tests/data/params/transfer_params.bin
+    client_mock_key: 6cbed15c793ce57650b9877cf6fa156fbef513c4e6134f022a85b1ffdd59b2a1
   tree:
     params: ./data/params
 web3:

@@ -1,5 +1,3 @@
-
-
 use relayer_rs::routes::transactions::TransactionRequest;
 
 use crate::helpers::spawn_app;
@@ -60,4 +58,22 @@ async fn gen_tx_and_send() {
         .expect("failed to make request");
 
     assert_eq!(response.status().as_u16(), 200 as u16);
+}
+
+#[actix_rt::test]
+async fn test_parse_fee_from_tx() {
+    // let tx_as_str = &std::fs::read_to_string("./tests/data/deposit.json").unwrap();
+    // println!("tx as str {}", tx_as_str);
+    let app = spawn_app(true).await.unwrap();
+    let generator = app.generator.expect("need generator to generate tx");
+
+    let tx_request = generator.generate_deposit().await.unwrap();
+    
+
+    let memo = memo_parser::memo::Memo::parse_memoblock(
+        tx_request.memo.bytes().collect(),
+        memo_parser::memo::TxType::DepositPermittable,
+    );
+
+    println!("memo fee: {:#?} ", memo.fee);
 }

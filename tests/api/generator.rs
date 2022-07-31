@@ -1,17 +1,15 @@
 use libzeropool::{
+    
     fawkes_crypto::{
-        backend::bellman_groth16::{engines::Bn256, prover, Parameters},
-        engines::bn256::Fr,
-        ff_uint::Num,
+        backend::bellman_groth16::{engines::Bn256, Parameters},
+        engines::{bn256::Fr, U256},
+        ff_uint::{Num, NumRepr},
     },
-    native::boundednum::BoundedNum, circuit::tx::{CTransferSec, CTransferPub, c_transfer},
+    native::boundednum::BoundedNum,
 };
-use serde::{Deserialize, Serialize};
-use libzeropool::fawkes_crypto::backend::bellman_groth16::setup;
+use relayer_rs::routes::transactions::{TransactionRequest, Proof};
 
-// use libzeropool::fawkes_crypto::backend::bellman_groth16::verifier::VK;
-// use libzeropool::fawkes_crypto::backend::bellman_groth16::{verifier::verify, Parameters};
-use libzeropool::fawkes_crypto::circuit::cs::CS;
+
 use libzeropool::POOL_PARAMS;
 use libzkbob_rs::proof::prove_tx;
 
@@ -26,25 +24,24 @@ use web3::{api::Accounts, types::SignedData};
 
 use crate::utils::TestError;
 
-#[derive(Serialize, Deserialize)]
-struct Proof {
-    inputs: Vec<Num<Fr>>,
-    proof: prover::Proof<Bn256>,
-}
+// #[derive(Serialize, Deserialize)]
+// struct Proof {
+//     inputs: Vec<Num<Fr>>,
+//     proof: prover::Proof<Bn256>,
+// }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Deposit {
-    proof: Proof,
-    pub memo: String,
-    tx_type: String,
-    deposit_signature: String,
-}
-
+// #[derive(Serialize, Deserialize)]
+// #[serde(rename_all = "camelCase")]
+// pub struct Deposit {
+//     proof: Proof,
+//     pub memo: String,
+//     tx_type: String,
+//     deposit_signature: String,
+// }
 
 pub struct Generator {
     sk: SecretKey,
-    pub tx_params : Parameters<Bn256>
+    pub tx_params: Option<Parameters<Bn256>>,
 }
 
 fn serialize(num: Num<Fr>) -> Result<[u8; 32], TestError> {
@@ -83,13 +80,13 @@ fn pack_signature(signature: &SignedData) -> Result<String, TestError> {
 }
 
 impl Generator {
-    pub fn new(client_key: &str) -> Self {
+    pub fn new(client_key: &str, tx_params: Option<Parameters<Bn256>>) -> Self {
         let sk: secp256k1::SecretKey = SecretKey::from_str(client_key).unwrap();
-        fn circuit<C: CS<Fr = Fr>>(public: CTransferPub<C>, secret: CTransferSec<C>) {
-            c_transfer(&public, &secret, &*POOL_PARAMS);
+
+        Self {
+            sk,
+            tx_params,
         }
-        let tx_params = setup::setup::<Bn256, _, _, _>(circuit);
-        Self { sk , tx_params}
     }
 
     fn sign(&self, buf: [u8; 32]) -> SignedData {
@@ -103,9 +100,8 @@ impl Generator {
         signed
     }
 
-    pub async fn generate_deposit(&self) -> Result<Deposit, TestError> {
-        
-
+    pub async fn generate_deposit(&self) -> Result<TransactionRequest, TestError> {
+        let tx_params = self.tx_params.as_ref().expect("need circuit params");
         let state = State::init_test(POOL_PARAMS.clone());
         let acc = UserAccount::new(
             Num::from(rand::thread_rng().gen::<u64>()),
@@ -113,10 +109,14 @@ impl Generator {
             POOL_PARAMS.clone(),
         );
 
+        let fee_numrepr = NumRepr(U256::from(1000_000_000) );
+        
+        let fee:BoundedNum<Fr, 64> = BoundedNum::new(Num::from_uint(fee_numrepr).unwrap());
+
         let tx_data = acc
             .create_tx(
                 TxType::Deposit(
-                    BoundedNum::new(Num::ZERO),
+                    fee,
                     vec![],
                     BoundedNum::new(Num::ONE),
                 ),
@@ -124,11 +124,9 @@ impl Generator {
             )
             .unwrap();
 
-        
-
         let nullifier: Num<libzeropool::fawkes_crypto::engines::bn256::Fr> =
             tx_data.public.nullifier;
-        let (inputs, proof) = prove_tx(&self.tx_params, &*POOL_PARAMS, tx_data.public, tx_data.secret);
+        let (inputs, proof) = prove_tx(tx_params, &*POOL_PARAMS, tx_data.public, tx_data.secret);
 
         let nullifier_bytes = serialize(nullifier)?;
 
@@ -136,7 +134,8 @@ impl Generator {
 
         let packed_sig = pack_signature(&deposit_signature)?;
 
-        Ok(Deposit {
+        Ok(TransactionRequest {
+            uuid: None,
             proof: Proof { inputs, proof },
             memo: hex::encode(tx_data.memo),
             tx_type: String::from("0000"),
@@ -156,9 +155,11 @@ fn nullifier_sign_test() {
 
     let nullifier_bytes = serialize(nullifier).unwrap();
 
-    let deposit_signature =
-        Generator::new("6cbed15c793ce57650b9877cf6fa156fbef513c4e6134f022a85b1ffdd59b2a1")
-            .sign(nullifier_bytes);
+    let deposit_signature = Generator::new(
+        "6cbed15c793ce57650b9877cf6fa156fbef513c4e6134f022a85b1ffdd59b2a1",
+        None,
+    )
+    .sign(nullifier_bytes);
 
     let packed_sig = pack_signature(&deposit_signature).unwrap();
 
@@ -175,9 +176,11 @@ fn verifiy_sig() {
 
     msg.copy_from_slice(&msg_vec[0..32]);
 
-    let signed_data =
-        Generator::new("6cbed15c793ce57650b9877cf6fa156fbef513c4e6134f022a85b1ffdd59b2a1")
-            .sign(msg);
+    let signed_data = Generator::new(
+        "6cbed15c793ce57650b9877cf6fa156fbef513c4e6134f022a85b1ffdd59b2a1",
+        None,
+    )
+    .sign(msg);
 
     let r = signed_data.r;
 

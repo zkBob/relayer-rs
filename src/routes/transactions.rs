@@ -53,8 +53,8 @@ pub struct TransactionRequest {
     pub uuid: Option<String>,
     pub proof: Proof,
     pub memo: String,
-    tx_type: String,
-    deposit_signature: String,
+    pub tx_type: String,
+    pub deposit_signature: String,
 }
 
 

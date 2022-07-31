@@ -49,6 +49,8 @@ impl ApplicationSettings {
 
 #[derive(Serialize, Deserialize, Clone,Debug)]
 pub struct Tx {
+    pub params: String,
+    pub client_mock_key: Option<String>,
     pub vk: String,
 }
 
