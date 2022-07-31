@@ -1,7 +1,7 @@
 use relayer_rs::{
     configuration::get_config,
-    startup::{Application, Job},
-    telemetry::{get_subscriber, init_subscriber},
+    startup::{Application},
+    telemetry::{get_subscriber, init_subscriber}, state::Job,
 };
 
 use libzeropool::POOL_PARAMS;
