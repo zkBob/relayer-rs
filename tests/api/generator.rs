@@ -109,9 +109,12 @@ impl Generator {
             POOL_PARAMS.clone(),
         );
 
-        let fee_numrepr = NumRepr(U256::from(1000_000_000) );
+        let fee_numrepr = NumRepr(U256::from(1) );
         
         let fee:BoundedNum<Fr, 64> = BoundedNum::new(Num::from_uint(fee_numrepr).unwrap());
+
+        // let fee:BoundedNum<Fr, 64> = BoundedNum::new(Num::ONE);
+
 
         let tx_data = acc
             .create_tx(
