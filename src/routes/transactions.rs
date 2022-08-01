@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::SystemTime;
 
 use actix_http::StatusCode;
 use actix_web::{
@@ -9,7 +6,6 @@ use actix_web::{
     HttpResponse, ResponseError,
 };
 use kvdb::{DBKey, DBTransaction, KeyValueDB};
-use kvdb_memorydb::InMemory;
 use serde::{Deserialize, Serialize};
 
 use kvdb::DBOp::Insert;
@@ -17,20 +13,14 @@ use libzeropool::fawkes_crypto::{
     backend::bellman_groth16::{
         engines::Bn256,
         prover,
-        verifier::{self, VK},
+        verifier,
     },
     engines::bn256::Fr,
     ff_uint::Num,
 };
-use serde_json::from_str;
-use tokio::sync::mpsc::Sender;
-
-use crate::startup::JobStatus;
 
 use crate::{
-    configuration::{ApplicationSettings, Web3Settings},
-    contracts::Pool,
-    startup::{Job, State},
+    state::{Job, State, JobStatus},
 };
 use uuid::Uuid;
 use memo_parser::{self, memo::Memo, memo::TxType};

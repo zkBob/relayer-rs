@@ -1,16 +1,19 @@
 use std::str::FromStr;
 
-use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::{Num, NumRepr}};
+use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::Num};
 use web3::{
     contract::{Contract, Options},
     transports::Http,
-types::{Transaction, TransactionId, H160, H256, U256},
+types::{Transaction, TransactionId, H160, H256, U256, BlockNumber, LogWithMeta, Bytes},
     Web3,
 };
 
 use actix_web::web::Data;
 
-use crate::{configuration::Web3Settings, startup::SyncError};
+use crate::{configuration::Web3Settings, state::SyncError};
+
+type MessageEvent = (U256, H256, Bytes);
+type Events = Vec<LogWithMeta<MessageEvent>>;
 
 pub struct Pool {
     pub contract: Contract<Http>,
@@ -79,5 +82,20 @@ impl Pool {
         tracing::debug!("got root from contract {}", root);
 
         Ok((pool_index, root))
+    }
+
+    pub async fn get_events(
+        &self,
+        from_block: Option<BlockNumber>,
+        to_block: Option<BlockNumber>,
+        block_hash: Option<H256>,
+    ) -> Result<Events, SyncError> {
+        let result = self
+            .contract
+            .events("Message", from_block, to_block, block_hash, (), (), ());
+
+        let events: Events = result.await?;
+
+        Ok(events)
     }
 }

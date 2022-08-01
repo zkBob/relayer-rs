@@ -9,7 +9,8 @@ use libzeropool::POOL_PARAMS;
 use libzkbob_rs::merkle::MerkleTree;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
-use relayer_rs::startup::{Application, Job, State};
+use relayer_rs::startup::Application;
+use relayer_rs::state::{Job, State};
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
 use tokio::sync::mpsc;
 
