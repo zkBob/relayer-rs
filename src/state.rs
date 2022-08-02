@@ -1,12 +1,13 @@
 use std::{sync::Mutex, time::SystemTime};
 
 use actix_web::web::{self, Data};
+use ethabi::ethereum_types::U256;
 use kvdb::{DBOp::Insert, DBTransaction, KeyValueDB};
 use libzeropool::{
-    constants::OUT,
+    constants::{OUT, OUTPLUSONELOG},
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, verifier::VK},
-        ff_uint::{Num, NumRepr, Uint},
+        ff_uint::{Num, NumRepr, Uint}, engines::bn256::Fr,
     },
     native::params::PoolBN256,
 };
@@ -56,6 +57,8 @@ pub struct Job {
     pub status: JobStatus,
     pub transaction_request: Option<TransactionRequest>,
     pub transaction: Option<Web3Transaction>,
+    pub index: U256,
+    pub commitment: Num<Fr> 
 }
 
 pub struct State<D: 'static + KeyValueDB> {
@@ -94,18 +97,17 @@ impl<D: 'static + KeyValueDB> State<D> {
                     .unwrap()
                     .iter()
                 {
-                    let index = event.event_data.0 - 128;
+                    let index = event.event_data.0 - (OUT+1);
                     if let Some(tx_hash) = event.transaction_hash {
                         if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
-                            let calldata = &tx.input.0;
-                            let calldata = memoparser::parse_calldata(hex::encode(calldata), None)
+                            let calldata = memoparser::parse_calldata(&tx.input.0, None)
                                 .expect("Calldata is invalid!");
 
-                            let commit = Num::from_uint_reduced(NumRepr(Uint::from_big_endian(
+                            let commitment = Num::from_uint_reduced(NumRepr(Uint::from_big_endian(
                                 &calldata.out_commit,
                             )));
-                            tracing::debug!("index: {}, commit {}", index, commit.to_string());
-                            db.add_leafs_and_commitments(vec![], vec![(index.as_u64(), commit)]);
+                            tracing::debug!("index: {}, commit {}", index, commitment.to_string());
+                            db.add_leafs_and_commitments(vec![], vec![(index.as_u64(), commitment)]);
                             tracing::debug!("local root {:#?}", db.get_root().to_string());
 
                             use kvdb::DBKey;
@@ -115,6 +117,9 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 status: JobStatus::Done,
                                 transaction_request: None,
                                 transaction: Some(tx),
+                                index,
+                                commitment
+
                             };
 
                             let db_transaction = DBTransaction {

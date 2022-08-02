@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use std::sync::mpsc::Sender;
 
 use actix_web::web::Data;
 use kvdb_memorydb::InMemory;
@@ -20,7 +21,7 @@ use libzeropool::{
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, Parameters},
         engines::bn256::Fr,
-    }
+    },
 };
 
 use crate::generator::Generator;
@@ -29,7 +30,7 @@ pub struct TestApp {
     pub config: Settings,
     pub address: String,
     pub port: u16,
-    state: Data<State<InMemory>>,
+    pub state: Data<State<InMemory>>,
     pub generator: Option<Generator>, // pub pool: Pool
 }
 type DB = Data<Mutex<MerkleTree<InMemory, PoolBN256>>>;
@@ -63,26 +64,26 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
             .client_mock_key
             .as_ref()
             .expect("a private key for client mock is expected");
-        // tracing::info!("Generating cicuit params for the app, don't forget to add --release, otjerwise it would be a loooooong wait");
+
         let tx_params_path = &config.application.tx.params;
 
         // let path = format!("{}", tx_params_folder);
         // tracing::info!("trying to load params from {}", path);
-        let f = std::fs::read(tx_params_path).unwrap();
-        
+        let params_bin = std::fs::read(tx_params_path).unwrap();
+
         let tx_params = {
-            match Parameters::<Bn256>::read(&mut f[..].as_ref(), true, true) {
+            match Parameters::<Bn256>::read(&mut params_bin[..].as_ref(), true, true) {
                 Ok(params) => params,
                 Err(_) => {
-                    tracing::debug!("pre-built parameters not found, generating a new set of params");
-                fn circuit<C: CS<Fr = Fr>>(public: CTransferPub<C>, secret: CTransferSec<C>) {
-                    c_transfer(&public, &secret, &*POOL_PARAMS);
+                    tracing::debug!("Pre-built parameters not found, generating a new set of params, Generating cicuit params for the app, don't forget to add --release, otherwise it would be a loooooong wait");
+                    fn circuit<C: CS<Fr = Fr>>(public: CTransferPub<C>, secret: CTransferSec<C>) {
+                        c_transfer(&public, &secret, &*POOL_PARAMS);
+                    }
+                    setup::setup::<Bn256, _, _, _>(circuit)
                 }
-                setup::setup::<Bn256, _, _, _>(circuit)
-                },
             }
         };
-        // let tx_params = std::fs::read(tx_params_folder)
+        // let tx_params = std::fs::read(tx_params_path)
         //     .map(|f| Parameters::<Bn256>::read(&mut f[..].as_ref(), true, true).unwrap())
         //     .unwrap_or({
         //         tracing::debug!("pre-built parameters not found, generating a new set of params");
@@ -96,11 +97,12 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
         tracing::info!("Using pre-built cicuit params specified in the configuration file");
     }
 
-    let (sender, mut rx) = mpsc::channel::<Data<Job>>(1000);
+    let (tree_prover_sender, mut tree_prover_receiver) = mpsc::channel::<Data<Job>>(1000);
+    // let (tx_checker_sender, mut tx_checker_receiver) = mpsc::channel::<Data<Job>>(1000);
 
-    let pending = Data::new(Mutex::new(MerkleTree::new_test(POOL_PARAMS.clone())));
+    let pending: DB = Data::new(Mutex::new(MerkleTree::new_test(POOL_PARAMS.clone())));
 
-    let finalized = Data::new(Mutex::new(MerkleTree::new_test(POOL_PARAMS.clone())));
+    let finalized: DB = Data::new(Mutex::new(MerkleTree::new_test(POOL_PARAMS.clone())));
 
     let jobs = Data::new(kvdb_memorydb::create(2));
 
@@ -115,7 +117,15 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
             .unwrap_or(prebuilt_vk)
     });
 
-    let app = Application::build(config.clone(), sender, pending, finalized, jobs, vk).await?;
+    let app = Application::build(
+        config.clone(),
+        tree_prover_sender,
+        pending,
+        finalized,
+        jobs,
+        vk,
+    )
+    .await?;
 
     let state = app.state.clone();
 
@@ -127,12 +137,22 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
 
     tokio::spawn(async move {
         tracing::info!("starting Receiver for Jobs channel");
-        while let Some(job) = rx.recv().await {
+        while let Some(job) = tree_prover_receiver.recv().await {
             if let Some(transaction_request) = job.transaction_request.as_ref() {
-                tracing::info!("Received tx {:#?}", transaction_request.memo);
+                tracing::info!("Received tx {:#?}", transaction_request);
             }
         }
     });
+
+
+//     tokio::spawn(async move {
+//         tracing::info!("starting Receiver for Eth transactions channel");
+//         while let Some(job) = tx_checker_receiver.recv().await {
+//             if let Some(transaction_request) = job.transaction_request.as_ref() {
+//                 tracing::info!("Received tx {:#?}", transaction_request);
+//             }
+//         }
+// });
 
     tokio::spawn(app.run_untill_stopped());
 
@@ -140,7 +160,7 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
         config,
         address,
         port,
-        state ,
-        generator,
+        state,
+        generator
     })
 }

@@ -5,6 +5,7 @@ use actix_web::{
     web::{self, Data},
     HttpResponse, ResponseError,
 };
+use ethabi::ethereum_types::U256;
 use kvdb::{DBKey, DBTransaction, KeyValueDB};
 use serde::{Deserialize, Serialize};
 
@@ -132,7 +133,8 @@ pub async fn transact<D: KeyValueDB>(
         "0003" => TxType::DepositPermittable,
         _ => TxType::Deposit,
     };
-    let parsed_memo = Memo::parse_memoblock(tx_memo_bytes.unwrap(), tx_type);
+    let parsed_memo = Memo::parse_memoblock(&tx_memo_bytes.unwrap(), tx_type);
+
     if parsed_memo.fee <= state.web3.relayer_fee {
         tracing::warn!(
             "request_id: {}, fee {:#?} , Fee too low!",
@@ -142,9 +144,7 @@ pub async fn transact<D: KeyValueDB>(
         return Err(ServiceError::BadRequest("Fee too low!".to_owned()));
     }
 
-    // check proof validity
-
-    // 3. Check proof
+    // 3. Check proof validity
     if !verifier::verify(
         &state.vk,
         &transaction_request.proof.proof,
@@ -154,18 +154,22 @@ pub async fn transact<D: KeyValueDB>(
         return Err(ServiceError::BadRequest("Invalid proof".to_owned()));
     }
 
+    let commitment = transaction_request.proof.inputs[2];
     //TODO:  3 calculate new virtual state root
     let mut pending_tree = state.pending.lock().unwrap();
-    pending_tree.append_hash(transaction_request.proof.inputs[2], false);
-    let virtual_state_root = pending_tree.get_root();
+
+    pending_tree.append_hash(commitment, false);
 
     // send to channel for further processing
     let created = SystemTime::now();
+
     let job = Job {
         created,
         status: JobStatus::Created,
         transaction_request: Some(transaction_request),
-        transaction: None
+        transaction: None,
+        index: U256::from(pending_tree.next_index()),
+        commitment
     };
 
     state.jobs.write(DBTransaction {

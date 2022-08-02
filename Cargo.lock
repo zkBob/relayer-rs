@@ -1780,7 +1780,7 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 [[package]]
 name = "memo-parser"
 version = "0.2.0"
-source = "git+https://github.com/zkBob/memo-parser?branch=feature/parse_calldata_fix#c6df201b3820b4d933f2b3394ce4043de44d92c5"
+source = "git+https://github.com/zkBob/memo-parser?branch=develop#e0afbde03874153f0cd1952a2bf344fd13d4266d"
 dependencies = [
  "chrono",
  "clap",

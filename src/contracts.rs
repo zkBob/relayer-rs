@@ -4,7 +4,7 @@ use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::Num};
 use web3::{
     contract::{Contract, Options},
     transports::Http,
-types::{Transaction, TransactionId, H160, H256, U256, BlockNumber, LogWithMeta, Bytes},
+types::{Transaction, TransactionId, H160, H256, U256, BlockNumber, LogWithMeta, Bytes, TransactionReceipt},
     Web3,
 };
 
@@ -33,7 +33,16 @@ impl Pool {
             .eth()
             .transaction(TransactionId::Hash(tx_hash))
             .await
-        // web3
+        
+    }
+
+    pub async fn get_transaction_receipt (&self, tx_hash: H256) -> Result<Option<TransactionReceipt>, web3::Error> {
+
+        self.web3
+            .eth()
+            .transaction_receipt(tx_hash)
+            .await
+        
     }
 
     pub fn new(config: Data<Web3Settings>) -> Result<Self, SyncError> {
