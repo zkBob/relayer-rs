@@ -1,3 +1,4 @@
+use libzeropool::fawkes_crypto::ff_uint::Num;
 use relayer_rs::routes::transactions::TransactionRequest;
 
 use crate::helpers::spawn_app;
@@ -76,4 +77,68 @@ async fn test_parse_fee_from_tx() {
     );
 
     println!("memo fee: {:#?} ", memo.fee);
+}
+
+#[actix_rt::test]
+async fn test_check_pending_state_after_tx() {
+    let test_app = spawn_app(true).await.unwrap();
+    {
+        let pending_state = test_app.state.pending.lock().unwrap();
+        let root = pending_state.get_root();
+        assert_eq!(root, Num::from("11469701942666298368112882412133877458305516134926649826543144744382391691533"));
+    }
+    use std::fs;
+    let file = fs::File::open("tests/data/transaction.json").unwrap();
+    let tx: TransactionRequest = serde_json::from_reader(file).unwrap();
+    let client = reqwest::Client::new();
+    client
+        .post(format!("{}/transact", test_app.address))
+        .body(serde_json::to_string(&tx).unwrap())
+        .header("Content-type", "application/json")
+        .send()
+        .await
+        .expect("failed to make request");
+    {
+        let pending_state = test_app.state.pending.lock().unwrap();
+        let root = pending_state.get_root();
+        assert_eq!(root, Num::from("16008527574580846904606969406329027992616751511283117704657085855575006190079"));
+    }
+}
+
+#[actix_rt::test]
+async fn test_check_pending_state_after_two_tx() {
+    let test_app = spawn_app(true).await.unwrap();
+    {
+        let pending_state = test_app.state.pending.lock().unwrap();
+        let root = pending_state.get_root();
+        assert_eq!(root, Num::from("11469701942666298368112882412133877458305516134926649826543144744382391691533"));
+    }
+    use std::fs;
+    let file = fs::File::open("tests/data/transaction.json").unwrap();
+    let tx: TransactionRequest = serde_json::from_reader(file).unwrap();
+    let client = reqwest::Client::new();
+    client
+        .post(format!("{}/transact", test_app.address))
+        .body(serde_json::to_string(&tx).unwrap())
+        .header("Content-type", "application/json")
+        .send()
+        .await
+        .expect("failed to make request");
+    {
+        let pending_state = test_app.state.pending.lock().unwrap();
+        let root = pending_state.get_root();
+        assert_eq!(root, Num::from("16008527574580846904606969406329027992616751511283117704657085855575006190079"));
+    }
+    client
+        .post(format!("{}/transact", test_app.address))
+        .body(serde_json::to_string(&tx).unwrap())
+        .header("Content-type", "application/json")
+        .send()
+        .await
+        .expect("failed to make request");
+    {
+        let pending_state = test_app.state.pending.lock().unwrap();
+        let root = pending_state.get_root();
+        assert_eq!(root, Num::from("18654607918309982490299585095288248711247171096327425318142876620343469986659"));
+    }
 }

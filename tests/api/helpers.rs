@@ -29,7 +29,7 @@ pub struct TestApp {
     pub config: Settings,
     pub address: String,
     pub port: u16,
-    state: Data<State<InMemory>>,
+    pub state: Data<State<InMemory>>,
     pub generator: Option<Generator>, // pub pool: Pool
 }
 type DB = Data<Mutex<MerkleTree<InMemory, PoolBN256>>>;
