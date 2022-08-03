@@ -32,6 +32,11 @@ async fn check_tx<D: KeyValueDB>(
             {
                 finalized.add_hash(job.index.try_into().unwrap(), job.commitment, false);
             }
+        } else {
+            let mut pending = state.pending.lock().unwrap();
+            let finalized = state.finalized.lock().unwrap();
+
+            pending.rollback(finalized.next_index());
         }
     }
 }

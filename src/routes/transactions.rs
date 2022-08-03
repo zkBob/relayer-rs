@@ -21,7 +21,7 @@ use libzeropool::fawkes_crypto::{
 };
 
 use crate::{
-    state::{Job, State, JobStatus},
+    state::{Job, State, JobStatus, JobsDbColumn},
 };
 use uuid::Uuid;
 use memo_parser::{self, memo::Memo, memo::TxType};
@@ -174,7 +174,7 @@ pub async fn transact<D: KeyValueDB>(
 
     state.jobs.write(DBTransaction {
         ops: vec![Insert {
-            col: 0,
+            col: JobsDbColumn::Jobs as u32,
             key: DBKey::from_vec(request_id.as_bytes().to_vec()),
             value: serde_json::to_string(&job).unwrap().as_bytes().to_vec(),
         }],

@@ -51,6 +51,12 @@ pub enum JobStatus {
     Rejected,
 }
 
+pub enum JobsDbColumn {
+    Jobs = 0,
+    Nullifiers = 1,
+    TxCheckTasks = 2
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Job {
     pub created: SystemTime,
@@ -124,7 +130,7 @@ impl<D: 'static + KeyValueDB> State<D> {
 
                             let db_transaction = DBTransaction {
                                 ops: vec![Insert {
-                                    col: 0,
+                                    col: JobsDbColumn::Jobs as u32,
                                     key: DBKey::from_vec(vec![1]),
                                     value: serde_json::to_vec(&job).unwrap(),
                                 }],
