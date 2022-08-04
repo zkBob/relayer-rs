@@ -7,7 +7,8 @@ use libzeropool::{
     constants::{OUT, OUTPLUSONELOG},
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, verifier::VK},
-        ff_uint::{Num, NumRepr, Uint}, engines::bn256::Fr,
+        engines::bn256::Fr,
+        ff_uint::{Num, NumRepr, Uint},
     },
     native::params::PoolBN256,
 };
@@ -15,6 +16,7 @@ use libzkbob_rs::merkle::MerkleTree;
 use memo_parser::memoparser;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
+use uuid::Uuid;
 use web3::types::{BlockNumber, Transaction as Web3Transaction};
 
 use crate::{
@@ -54,7 +56,7 @@ pub enum JobStatus {
 pub enum JobsDbColumn {
     Jobs = 0,
     Nullifiers = 1,
-    TxCheckTasks = 2
+    TxCheckTasks = 2,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -63,8 +65,16 @@ pub struct Job {
     pub status: JobStatus,
     pub transaction_request: Option<TransactionRequest>,
     pub transaction: Option<Web3Transaction>,
-    pub index: U256,
-    pub commitment: Num<Fr> 
+    pub index: u64,
+    pub commitment: Num<Fr>,
+    pub root: Option<Num<Fr>>,
+    pub nullifier: String,
+}
+
+impl Job {
+    pub fn reject(mut self) -> () {
+        self.status = JobStatus::Rejected;
+    }
 }
 
 pub struct State<D: 'static + KeyValueDB> {
@@ -103,20 +113,22 @@ impl<D: 'static + KeyValueDB> State<D> {
                     .unwrap()
                     .iter()
                 {
-                    let index = event.event_data.0 - (OUT+1);
+                    let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
                     if let Some(tx_hash) = event.transaction_hash {
                         if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
                             let calldata = memoparser::parse_calldata(&tx.input.0, None)
                                 .expect("Calldata is invalid!");
 
-                            let commitment = Num::from_uint_reduced(NumRepr(Uint::from_big_endian(
-                                &calldata.out_commit,
-                            )));
+                            let commitment = Num::from_uint_reduced(NumRepr(
+                                Uint::from_big_endian(&calldata.out_commit),
+                            ));
                             tracing::debug!("index: {}, commit {}", index, commitment.to_string());
-                            db.add_leafs_and_commitments(vec![], vec![(index.as_u64(), commitment)]);
+                            db.add_leafs_and_commitments(vec![], vec![(index, commitment)]);
                             tracing::debug!("local root {:#?}", db.get_root().to_string());
 
                             use kvdb::DBKey;
+
+                            let nullifier = String::from_utf8(calldata.nullifier).unwrap();
 
                             let job = Job {
                                 created: SystemTime::now(),
@@ -124,8 +136,9 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 transaction_request: None,
                                 transaction: Some(tx),
                                 index,
-                                commitment
-
+                                commitment,
+                                nullifier,
+                                root: None,
                             };
 
                             let db_transaction = DBTransaction {

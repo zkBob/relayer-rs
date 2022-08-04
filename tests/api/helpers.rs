@@ -104,7 +104,12 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
 
     let finalized: DB = Data::new(Mutex::new(MerkleTree::new_test(POOL_PARAMS.clone())));
 
-    let jobs = Data::new(kvdb_memorydb::create(2));
+    let jobs = Data::new(kvdb_memorydb::create(3));
+    /*
+    0 - jobs 
+    1 - nullifiers
+    2 - tx to check receipt ( can't query jobs by status )
+     */
 
     let vk_str = std::fs::read_to_string(&config.application.tx.vk).unwrap();
 

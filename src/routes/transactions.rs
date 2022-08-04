@@ -11,20 +11,14 @@ use serde::{Deserialize, Serialize};
 
 use kvdb::DBOp::Insert;
 use libzeropool::fawkes_crypto::{
-    backend::bellman_groth16::{
-        engines::Bn256,
-        prover,
-        verifier,
-    },
+    backend::bellman_groth16::{engines::Bn256, prover, verifier},
     engines::bn256::Fr,
     ff_uint::Num,
 };
 
-use crate::{
-    state::{Job, State, JobStatus, JobsDbColumn},
-};
-use uuid::Uuid;
+use crate::state::{Job, JobStatus, JobsDbColumn, State};
 use memo_parser::{self, memo::Memo, memo::TxType};
+use uuid::Uuid;
 extern crate hex;
 #[derive(Debug)]
 pub enum ServiceError {
@@ -47,7 +41,6 @@ pub struct TransactionRequest {
     pub tx_type: String,
     pub deposit_signature: String,
 }
-
 
 #[derive(Serialize)]
 pub struct Response {
@@ -163,25 +156,43 @@ pub async fn transact<D: KeyValueDB>(
     // send to channel for further processing
     let created = SystemTime::now();
 
+    let nullifier_key = DBKey::from_slice(nullifier.as_bytes());
+
     let job = Job {
         created,
         status: JobStatus::Created,
         transaction_request: Some(transaction_request),
         transaction: None,
-        index: U256::from(pending_tree.next_index()),
-        commitment
+        index: pending_tree.next_index(),
+        commitment,
+        nullifier,
+        root: None,
     };
 
     state.jobs.write(DBTransaction {
-        ops: vec![Insert {
-            col: JobsDbColumn::Jobs as u32,
-            key: DBKey::from_vec(request_id.as_bytes().to_vec()),
-            value: serde_json::to_string(&job).unwrap().as_bytes().to_vec(),
-        }],
+        ops: vec![
+            /*
+            Saving Job info with transaction request to be later retrieved by client
+            In case of rollback an existing row is mutated
+            TODO: use Borsh instead of JSON
+            */
+            Insert {
+                col: JobsDbColumn::Jobs as u32,
+                key: DBKey::from_vec(request_id.as_bytes().to_vec()),
+                value: serde_json::to_string(&job).unwrap().as_bytes().to_vec(),
+            },
+            /*
+            Saving nullifiers to avoid double spend spam-atack.
+            Nullifiers are stored to persistent DB, if rollback happens, they get deleted individually
+             */
+            Insert {
+                col: JobsDbColumn::Nullifiers as u32,
+                key: nullifier_key,
+                value: vec![],
+            },
+        ],
     })?;
     state.sender.send(Data::new(job)).await.unwrap();
-
-    //TODO:   4 generate UUID for request and save to in-memory map
 
     let body = serde_json::to_string(&Response {
         job_id: request_id.as_hyphenated().to_string(),
