@@ -159,6 +159,7 @@ pub async fn transact<D: KeyValueDB>(
     // send to channel for further processing
     let created = SystemTime::now();
     let job = Job {
+        id: request_id.as_hyphenated().to_string(),
         created,
         status: JobStatus::Created,
         transaction_request: Some(transaction_request),

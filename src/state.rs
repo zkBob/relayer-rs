@@ -14,6 +14,7 @@ use libzkbob_rs::merkle::MerkleTree;
 use memo_parser::memoparser;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
+use uuid::Uuid;
 use web3::types::{BlockNumber, Transaction as Web3Transaction};
 
 use crate::{
@@ -52,6 +53,7 @@ pub enum JobStatus {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Job {
+    pub id: String,
     pub created: SystemTime,
     pub status: JobStatus,
     pub transaction_request: Option<TransactionRequest>,
@@ -110,7 +112,10 @@ impl<D: 'static + KeyValueDB> State<D> {
 
                             use kvdb::DBKey;
 
+                            let job_id = Uuid::new_v4();
+                            
                             let job = Job {
+                                id: job_id.as_hyphenated().to_string(),
                                 created: SystemTime::now(),
                                 status: JobStatus::Done,
                                 transaction_request: None,
@@ -120,13 +125,11 @@ impl<D: 'static + KeyValueDB> State<D> {
                             let db_transaction = DBTransaction {
                                 ops: vec![Insert {
                                     col: 0,
-                                    key: DBKey::from_vec(vec![1]),
+                                    key: DBKey::from_vec(job_id.as_bytes().to_vec()),
                                     value: serde_json::to_vec(&job).unwrap(),
                                 }],
                             };
                             self.jobs.write(db_transaction)?;
-
-                            //TODO: state.addTx(index, Buffer.from(commitAndMemo, 'hex'))
                         }
                     }
                 }

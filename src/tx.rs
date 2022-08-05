@@ -63,7 +63,7 @@ pub fn build<D: 'static + KeyValueDB>(
     }
 
     let tx_data = tx_data.join("");
-    tracing::debug!("[Job: {}] TX DATA: {}", 123, tx_data); // TODO: add job id
+    tracing::debug!("[Job: {}] TX DATA: {}", job.id, tx_data);
     tx_data
 }
 
@@ -100,8 +100,8 @@ fn prove_tree<D: 'static + KeyValueDB>(
         prev_leaf,
     };
 
-    tracing::debug!("[Job: {}] Proving tree...", 123); // TODO: add job id
+    tracing::debug!("[Job: {}] Proving tree update...", job.id);
     let tree_proof = proof::prove_tree(params, &POOL_PARAMS.clone(), tree_pub, tree_sec);
-    tracing::debug!("[Job: {}] Tree proved!", 123); // TODO: add job id
+    tracing::debug!("[Job: {}] Tree update proved!", job.id);
     tree_proof
 }
