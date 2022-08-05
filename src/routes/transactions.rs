@@ -155,9 +155,6 @@ pub async fn transact<D: KeyValueDB>(
     }
 
     //TODO:  3 calculate new virtual state root
-    let mut pending_tree = state.pending.lock().unwrap();
-    pending_tree.append_hash(transaction_request.proof.inputs[2], false);
-    let virtual_state_root = pending_tree.get_root();
 
     // send to channel for further processing
     let created = SystemTime::now();

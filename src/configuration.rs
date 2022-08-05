@@ -19,7 +19,7 @@ pub struct ApplicationSettings {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Credentials {
-    secret_key: String
+    pub secret_key: String
 }
 
 #[derive(Serialize,Deserialize,Clone,Debug)]
@@ -32,7 +32,7 @@ pub struct Web3Settings {
     pub credentials: Credentials
 }
 
-use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier};
+use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier, Parameters};
 
 impl ApplicationSettings {
     pub fn get_tx_vk(&self) -> Result<verifier::VK<Bn256>, std::io::Error> {
@@ -44,6 +44,11 @@ impl ApplicationSettings {
         let vk_file = std::fs::File::open(base_path.join(&self.tx.vk))?;
         let vk: verifier::VK<Bn256> = serde_json::from_reader(vk_file)?;
         Ok(vk)
+    }
+
+    pub fn get_tree_params(&self) -> Parameters<Bn256> {
+        let data = std::fs::read(self.tree.params.clone()).unwrap();
+        Parameters::<Bn256>::read(&mut data.as_slice(), true, true).unwrap()
     }
 }
 
