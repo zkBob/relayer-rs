@@ -1,4 +1,4 @@
-use std::{sync::Mutex, time::SystemTime};
+use std::{sync::Mutex, time::{SystemTime, Duration}, thread::sleep};
 
 use actix_web::web::{self, Data};
 use ethabi::ethereum_types::U256;
@@ -20,7 +20,7 @@ use uuid::Uuid;
 use web3::types::{BlockNumber, Transaction as Web3Transaction};
 
 use crate::{
-    configuration::Web3Settings, contracts::Pool, routes::transactions::TransactionRequest,
+    configuration::Web3Settings, contracts::Pool, routes::transactions::TransactionRequest, tx_checker::check_tx,
 };
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -68,7 +68,7 @@ pub struct Job {
     pub index: u64,
     pub commitment: Num<Fr>,
     pub root: Option<Num<Fr>>,
-    pub nullifier: String,
+    pub nullifier: Num<Fr>,
 }
 
 impl Job {
@@ -128,7 +128,9 @@ impl<D: 'static + KeyValueDB> State<D> {
 
                             use kvdb::DBKey;
 
-                            let nullifier = String::from_utf8(calldata.nullifier).unwrap();
+                            let nullifier:Num<Fr> = Num::from_uint_reduced(NumRepr(
+                                Uint::from_big_endian(&calldata.nullifier),
+                            ));
 
                             let job = Job {
                                 created: SystemTime::now(),
@@ -141,10 +143,12 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 root: None,
                             };
 
+
+                            tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash) );
                             let db_transaction = DBTransaction {
                                 ops: vec![Insert {
                                     col: JobsDbColumn::Jobs as u32,
-                                    key: DBKey::from_vec(vec![1]),
+                                    key: DBKey::from_vec(tx_hash.as_bytes().to_vec()),
                                     value: serde_json::to_vec(&job).unwrap(),
                                 }],
                             };
@@ -161,4 +165,31 @@ impl<D: 'static + KeyValueDB> State<D> {
 
         Ok(())
     }
+
+    pub fn start_poller(self) -> () {
+    
+        let jobs: Vec<Job> = self
+            .jobs
+            .iter(JobsDbColumn::TxCheckTasks as u32)
+            .map(|(_k, v)| serde_json::from_slice(&v[..]).unwrap())
+            .collect();
+        tokio::spawn(async move {
+            let state = Data::new(self);
+            for job in jobs.into_iter() {
+                let state = state.clone();
+                tracing::debug!("polling started at {:?}", SystemTime::now());
+                match check_tx(job, state).await {
+                    Err(_) | Ok(JobStatus::Rejected) => {
+                        tracing::warn!(
+                            "caught error / revert " // TODO: add job id
+                        );
+                        break;
+                    }
+                    _ => (),
+                }
+            }
+            sleep(Duration::from_secs(5));
+        });
+    }
+
 }

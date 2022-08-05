@@ -1,30 +1,31 @@
-use std::{
-    sync::mpsc::Sender,
-    time::{Duration, SystemTime},
-};
-
 use actix_web::web::Data;
 use std::thread::sleep;
+use std::time::{Duration, SystemTime};
 
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
 use libzeropool::constants::OUTPLUSONELOG;
 
-use crate::{
-    contracts::Pool,
-    state::{Job, JobStatus, JobsDbColumn, State},
-};
+use crate::helpers::serialize;
+use crate::state::{Job, JobStatus, JobsDbColumn, State};
 
-fn start_poller<D: KeyValueDB>(state: Data<State<D>>, pool: Data<Pool>) -> () {
+pub fn start_poller<D: KeyValueDB>(state: &Data<State<D>>) -> () {
+    let state = state.clone();
+
+    let jobs: Vec<Job> = state
+        .jobs
+        .iter(JobsDbColumn::TxCheckTasks as u32)
+        .map(|(_k, v)| serde_json::from_slice(&v[..]).unwrap())
+        .collect();
     tokio::spawn(async move {
-        for (id, job) in state.jobs.iter(JobsDbColumn::TxCheckTasks as u32) {
+        // let pool = Data::new(state.pool);
+        for job in jobs.into_iter() {
             let state = state.clone();
-            let pool = pool.clone();
+
             tracing::debug!("polling started at {:?}", SystemTime::now());
-            match check_tx(serde_json::from_slice(&job[..]).unwrap(), pool, state).await {
+            match check_tx(job, state).await {
                 Err(_) | Ok(JobStatus::Rejected) => {
                     tracing::warn!(
-                        "caught error / revert at {}",
-                        String::from_utf8(id.to_vec()).unwrap()
+                        "caught error / revert " // TODO: add job id
                     );
                     break;
                 }
@@ -35,34 +36,17 @@ fn start_poller<D: KeyValueDB>(state: Data<State<D>>, pool: Data<Pool>) -> () {
     });
 }
 
-// async fn poll<D: KeyValueDB>(state: Data<State<D>>, pool: Data<Pool>) {
-//     for (id, job) in state.jobs.iter(JobsDbColumn::TxCheckTasks as u32) {
-//         let state = state.clone();
-//         let pool = pool.clone();
-//         tracing::debug!("polling started at {:?}", SystemTime::now());
-//         match check_tx(serde_json::from_slice(&job[..]).unwrap(), pool, state).await {
-//             Err(_) | Ok(JobStatus::Rejected) => {
-//                 tracing::warn!(
-//                     "caught error / revert at {}",
-//                     String::from_utf8(id.to_vec()).unwrap()
-//                 );
-//                 break;
-//             }
-//             _ => (),
-//         }
-//     }
-
-//     // check_tx(job, sender, pool, state)
-// }
-
-async fn check_tx<D: KeyValueDB>(
+pub async fn check_tx<D: KeyValueDB>(
     mut job: Job,
-    pool: Data<Pool>,
+    // pool: Data<Pool>,
     state: Data<State<D>>,
 ) -> Result<JobStatus, std::io::Error> {
+
     let jobs = &state.jobs;
     let tx_hash = job.transaction.as_ref().unwrap().hash;
-    if let Some(tx_receipt) = pool
+    tracing::info!("check for tx {} started", tx_hash);
+    if let Some(tx_receipt) = state
+        .pool
         .get_transaction_receipt(tx_hash)
         .await
         .expect("failed to get transaction receipt")
@@ -75,7 +59,7 @@ async fn check_tx<D: KeyValueDB>(
 
             let tx_request = job.transaction_request.as_ref().unwrap();
 
-            let tx = job.transaction.as_ref().unwrap();
+            // let tx = job.transaction.as_ref().unwrap();
 
             let mut finalized = state.finalized.lock().unwrap();
             {
@@ -122,17 +106,12 @@ async fn check_tx<D: KeyValueDB>(
 
                     let delete_nullifier_operation = DBOp::Delete {
                         col: JobsDbColumn::Nullifiers as u32,
-                        key: DBKey::from_slice(job.nullifier.as_bytes()),
+                        key: DBKey::from_slice(&serialize(job.nullifier).unwrap()),
                     };
 
                     let transaction = DBTransaction {
                         ops: vec![reject_job_operation, delete_nullifier_operation],
                     };
-
-                    let error_message = &format!(
-                        "failed to rollback job {:#?}",
-                        String::from_utf8(request_id.to_vec()).unwrap()
-                    );
 
                     jobs.write(transaction)?;
                 }

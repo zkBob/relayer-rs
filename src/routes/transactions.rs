@@ -16,7 +16,7 @@ use libzeropool::fawkes_crypto::{
     ff_uint::Num,
 };
 
-use crate::state::{Job, JobStatus, JobsDbColumn, State};
+use crate::{state::{Job, JobStatus, JobsDbColumn, State}, helpers::serialize};
 use memo_parser::{self, memo::Memo, memo::TxType};
 use uuid::Uuid;
 extern crate hex;
@@ -97,14 +97,14 @@ pub async fn transact<D: KeyValueDB>(
 
     // 1. check nullifier for double spend
 
-    let nullifier = transaction_request.proof.inputs[1].to_string();
+    let nullifier = transaction_request.proof.inputs[1];
     tracing::info!(
         "request_id: {}, Checking Nullifier {:#?}",
         request_id,
         nullifier
     );
     let pool = &state.pool;
-    if !pool.check_nullifier(&nullifier).await.unwrap() {
+    if !pool.check_nullifier(&nullifier.to_string()).await.unwrap() {
         let error_message = format!(
             "request_id: {}, Nullifier {:#?} , Double spending detected",
             request_id, &nullifier
@@ -156,7 +156,7 @@ pub async fn transact<D: KeyValueDB>(
     // send to channel for further processing
     let created = SystemTime::now();
 
-    let nullifier_key = DBKey::from_slice(nullifier.as_bytes());
+    let nullifier_key = DBKey::from_slice(&serialize(nullifier).unwrap());
 
     let job = Job {
         created,

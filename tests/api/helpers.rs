@@ -1,5 +1,4 @@
 use std::sync::Mutex;
-use std::sync::mpsc::Sender;
 
 use actix_web::web::Data;
 use kvdb_memorydb::InMemory;
@@ -13,6 +12,7 @@ use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::startup::Application;
 use relayer_rs::state::{Job, State};
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
+use relayer_rs::tx_checker::start_poller;
 use tokio::sync::mpsc;
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::setup;
@@ -149,15 +149,6 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
         }
     });
 
-
-//     tokio::spawn(async move {
-//         tracing::info!("starting Receiver for Eth transactions channel");
-//         while let Some(job) = tx_checker_receiver.recv().await {
-//             if let Some(transaction_request) = job.transaction_request.as_ref() {
-//                 tracing::info!("Received tx {:#?}", transaction_request);
-//             }
-//         }
-// });
 
     tokio::spawn(app.run_untill_stopped());
 
