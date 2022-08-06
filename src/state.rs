@@ -61,6 +61,7 @@ pub enum JobsDbColumn {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Job {
+    pub id: String,
     pub created: SystemTime,
     pub status: JobStatus,
     pub transaction_request: Option<TransactionRequest>,
@@ -128,11 +129,17 @@ impl<D: 'static + KeyValueDB> State<D> {
 
                             use kvdb::DBKey;
 
+
                             let nullifier:Num<Fr> = Num::from_uint_reduced(NumRepr(
                                 Uint::from_big_endian(&calldata.nullifier),
                             ));
 
+
+                            let job_id = Uuid::new_v4();
+                            
+
                             let job = Job {
+                                id: job_id.as_hyphenated().to_string(),
                                 created: SystemTime::now(),
                                 status: JobStatus::Done,
                                 transaction_request: None,
@@ -147,14 +154,14 @@ impl<D: 'static + KeyValueDB> State<D> {
                             tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash) );
                             let db_transaction = DBTransaction {
                                 ops: vec![Insert {
+
                                     col: JobsDbColumn::Jobs as u32,
-                                    key: DBKey::from_vec(tx_hash.as_bytes().to_vec()),
+                                    key: DBKey::from_vec(job_id.as_bytes().to_vec()),
+
                                     value: serde_json::to_vec(&job).unwrap(),
                                 }],
                             };
                             self.jobs.write(db_transaction)?;
-
-                            //TODO: state.addTx(index, Buffer.from(commitAndMemo, 'hex'))
                         }
                     }
                 }

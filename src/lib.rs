@@ -5,4 +5,5 @@ pub mod telemetry;
 pub mod contracts;
 pub mod state;
 pub mod tx_checker;
+pub mod tx;
 pub mod helpers;

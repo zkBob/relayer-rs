@@ -12,6 +12,7 @@ use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::startup::Application;
 use relayer_rs::state::{Job, State};
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
+use relayer_rs::tx;
 use relayer_rs::tx_checker::start_poller;
 use tokio::sync::mpsc;
 
@@ -122,6 +123,9 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
             .unwrap_or(prebuilt_vk)
     });
 
+
+    let pending_clone = pending.clone();
+
     let app = Application::build(
         config.clone(),
         tree_prover_sender,
@@ -140,12 +144,25 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
 
     let address = format!("http://127.0.0.1:{}", port);
 
+    let tree_params = config.application.get_tree_params();
+
+    
+
     tokio::spawn(async move {
-        tracing::info!("starting Receiver for Jobs channel");
+        tracing::info!("starting receiver");
+        
         while let Some(job) = tree_prover_receiver.recv().await {
-            if let Some(transaction_request) = job.transaction_request.as_ref() {
-                tracing::info!("Received tx {:#?}", transaction_request);
-            }
+            let _tx_data = {
+                let mut p = pending_clone.lock().unwrap();
+                let tx_data = tx::build(&job, &p, &tree_params);
+                
+                let transaction_request = job.transaction_request.as_ref().unwrap();
+                p.append_hash(transaction_request.proof.inputs[2], false);
+                
+                tx_data
+            };
+            // pool.send_tx(tx_data).await;
+            
         }
     });
 

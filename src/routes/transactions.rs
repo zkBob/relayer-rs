@@ -148,10 +148,6 @@ pub async fn transact<D: KeyValueDB>(
     }
 
     let commitment = transaction_request.proof.inputs[2];
-    //TODO:  3 calculate new virtual state root
-    let mut pending_tree = state.pending.lock().unwrap();
-
-    pending_tree.append_hash(commitment, false);
 
     // send to channel for further processing
     let created = SystemTime::now();
@@ -159,11 +155,12 @@ pub async fn transact<D: KeyValueDB>(
     let nullifier_key = DBKey::from_slice(&serialize(nullifier).unwrap());
 
     let job = Job {
+        id: request_id.as_hyphenated().to_string(),
         created,
         status: JobStatus::Created,
         transaction_request: Some(transaction_request),
         transaction: None,
-        index: pending_tree.next_index(),
+        index: 0,
         commitment,
         nullifier,
         root: None,

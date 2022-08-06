@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::Num};
+use secp256k1::SecretKey;
 use web3::{
     contract::{Contract, Options},
     transports::Http,
@@ -23,7 +24,6 @@ pub struct Pool {
 fn get_web3(config: &Data<Web3Settings>) -> web3::Web3<Http> {
     let http = web3::transports::Http::new(&config.provider_endpoint)
         .expect("failed to init web3 provider");
-
     web3::Web3::new(http)
 }
 
@@ -106,5 +106,10 @@ impl Pool {
         let events: Events = result.await?;
 
         Ok(events)
+    }
+
+    pub async fn send_tx(&self, tx_data: String) {
+        let key = SecretKey::from_str("6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c").unwrap();
+        self.contract.signed_call("transact", hex::decode(tx_data).unwrap(), Options::default(), &key).await.unwrap();
     }
 }
