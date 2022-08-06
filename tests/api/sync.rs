@@ -10,7 +10,7 @@ use crate::helpers::spawn_app;
 #[tokio::test]
 async fn test_sync() {
     
-    let app = spawn_app(false).await.unwrap();
+    let _app = spawn_app(false).await.unwrap();
 
     // let generator = app.generator.expect("setup was not completed, rerun spawn_app with setup = true");
 

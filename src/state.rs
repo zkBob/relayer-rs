@@ -1,11 +1,13 @@
-use std::{sync::Mutex, time::SystemTime};
+use std::{sync::Mutex, time::{SystemTime, Duration}, thread::sleep};
 
 use actix_web::web::{self, Data};
+use ethabi::ethereum_types::U256;
 use kvdb::{DBOp::Insert, DBTransaction, KeyValueDB};
 use libzeropool::{
-    constants::OUT,
+    constants::{OUT, OUTPLUSONELOG},
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, verifier::VK},
+        engines::bn256::Fr,
         ff_uint::{Num, NumRepr, Uint},
     },
     native::params::PoolBN256,
@@ -14,10 +16,11 @@ use libzkbob_rs::merkle::MerkleTree;
 use memo_parser::memoparser;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
+use uuid::Uuid;
 use web3::types::{BlockNumber, Transaction as Web3Transaction};
 
 use crate::{
-    configuration::Web3Settings, contracts::Pool, routes::transactions::TransactionRequest,
+    configuration::Web3Settings, contracts::Pool, routes::transactions::TransactionRequest, tx_checker::check_tx,
 };
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -50,12 +53,29 @@ pub enum JobStatus {
     Rejected,
 }
 
+pub enum JobsDbColumn {
+    Jobs = 0,
+    Nullifiers = 1,
+    TxCheckTasks = 2,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Job {
+    pub id: String,
     pub created: SystemTime,
     pub status: JobStatus,
     pub transaction_request: Option<TransactionRequest>,
     pub transaction: Option<Web3Transaction>,
+    pub index: u64,
+    pub commitment: Num<Fr>,
+    pub root: Option<Num<Fr>>,
+    pub nullifier: Num<Fr>,
+}
+
+impl Job {
+    pub fn reject(mut self) -> () {
+        self.status = JobStatus::Rejected;
+    }
 }
 
 pub struct State<D: 'static + KeyValueDB> {
@@ -94,39 +114,54 @@ impl<D: 'static + KeyValueDB> State<D> {
                     .unwrap()
                     .iter()
                 {
-                    let index = event.event_data.0 - 128;
+                    let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
                     if let Some(tx_hash) = event.transaction_hash {
                         if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
-                            let calldata = &tx.input.0;
-                            let calldata = memoparser::parse_calldata(hex::encode(calldata), None)
+                            let calldata = memoparser::parse_calldata(&tx.input.0, None)
                                 .expect("Calldata is invalid!");
 
-                            let commit = Num::from_uint_reduced(NumRepr(Uint::from_big_endian(
-                                &calldata.out_commit,
-                            )));
-                            tracing::debug!("index: {}, commit {}", index, commit.to_string());
-                            db.add_leafs_and_commitments(vec![], vec![(index.as_u64(), commit)]);
+                            let commitment = Num::from_uint_reduced(NumRepr(
+                                Uint::from_big_endian(&calldata.out_commit),
+                            ));
+                            tracing::debug!("index: {}, commit {}", index, commitment.to_string());
+                            db.add_leafs_and_commitments(vec![], vec![(index, commitment)]);
                             tracing::debug!("local root {:#?}", db.get_root().to_string());
 
                             use kvdb::DBKey;
 
+
+                            let nullifier:Num<Fr> = Num::from_uint_reduced(NumRepr(
+                                Uint::from_big_endian(&calldata.nullifier),
+                            ));
+
+
+                            let job_id = Uuid::new_v4();
+                            
+
                             let job = Job {
+                                id: job_id.as_hyphenated().to_string(),
                                 created: SystemTime::now(),
                                 status: JobStatus::Done,
                                 transaction_request: None,
                                 transaction: Some(tx),
+                                index,
+                                commitment,
+                                nullifier,
+                                root: None,
                             };
 
+
+                            tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash) );
                             let db_transaction = DBTransaction {
                                 ops: vec![Insert {
-                                    col: 0,
-                                    key: DBKey::from_vec(vec![1]),
+
+                                    col: JobsDbColumn::Jobs as u32,
+                                    key: DBKey::from_vec(job_id.as_bytes().to_vec()),
+
                                     value: serde_json::to_vec(&job).unwrap(),
                                 }],
                             };
                             self.jobs.write(db_transaction)?;
-
-                            //TODO: state.addTx(index, Buffer.from(commitAndMemo, 'hex'))
                         }
                     }
                 }
@@ -137,4 +172,31 @@ impl<D: 'static + KeyValueDB> State<D> {
 
         Ok(())
     }
+
+    pub fn start_poller(self) -> () {
+    
+        let jobs: Vec<Job> = self
+            .jobs
+            .iter(JobsDbColumn::TxCheckTasks as u32)
+            .map(|(_k, v)| serde_json::from_slice(&v[..]).unwrap())
+            .collect();
+        tokio::spawn(async move {
+            let state = Data::new(self);
+            for job in jobs.into_iter() {
+                let state = state.clone();
+                tracing::debug!("polling started at {:?}", SystemTime::now());
+                match check_tx(job, state).await {
+                    Err(_) | Ok(JobStatus::Rejected) => {
+                        tracing::warn!(
+                            "caught error / revert " // TODO: add job id
+                        );
+                        break;
+                    }
+                    _ => (),
+                }
+            }
+            sleep(Duration::from_secs(5));
+        });
+    }
+
 }

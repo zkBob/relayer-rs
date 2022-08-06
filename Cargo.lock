@@ -1780,7 +1780,7 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 [[package]]
 name = "memo-parser"
 version = "0.2.0"
-source = "git+https://github.com/zkBob/memo-parser?branch=feature/parse_calldata_fix#c6df201b3820b4d933f2b3394ce4043de44d92c5"
+source = "git+https://github.com/zkBob/memo-parser?branch=develop#e0afbde03874153f0cd1952a2bf344fd13d4266d"
 dependencies = [
  "chrono",
  "clap",
@@ -1884,6 +1884,17 @@ name = "num-bigint"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f6f7833f2cbf2360a6cfd58cd41a53aa7a90bd4c202f5b1c7dd2ed73c57b2c3"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits 0.2.15",
+]
+
+[[package]]
+name = "num-bigint"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f93ab6289c7b344a8a9f60f88d80aa20032336fe78da341afc91c8a2341fc75f"
 dependencies = [
  "autocfg",
  "num-integer",
@@ -2508,6 +2519,7 @@ dependencies = [
  "libzeropool",
  "libzkbob-rs",
  "memo-parser",
+ "num-bigint 0.4.3",
  "once_cell",
  "rand 0.8.5",
  "reqwest",

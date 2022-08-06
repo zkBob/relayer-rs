@@ -1,10 +1,11 @@
 use std::str::FromStr;
 
 use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::Num};
+use secp256k1::SecretKey;
 use web3::{
     contract::{Contract, Options},
     transports::Http,
-types::{Transaction, TransactionId, H160, H256, U256, BlockNumber, LogWithMeta, Bytes},
+types::{Transaction, TransactionId, H160, H256, U256, BlockNumber, LogWithMeta, Bytes, TransactionReceipt},
     Web3,
 };
 
@@ -23,7 +24,6 @@ pub struct Pool {
 fn get_web3(config: &Data<Web3Settings>) -> web3::Web3<Http> {
     let http = web3::transports::Http::new(&config.provider_endpoint)
         .expect("failed to init web3 provider");
-
     web3::Web3::new(http)
 }
 
@@ -33,7 +33,16 @@ impl Pool {
             .eth()
             .transaction(TransactionId::Hash(tx_hash))
             .await
-        // web3
+        
+    }
+
+    pub async fn get_transaction_receipt (&self, tx_hash: H256) -> Result<Option<TransactionReceipt>, web3::Error> {
+
+        self.web3
+            .eth()
+            .transaction_receipt(tx_hash)
+            .await
+        
     }
 
     pub fn new(config: Data<Web3Settings>) -> Result<Self, SyncError> {
@@ -97,5 +106,10 @@ impl Pool {
         let events: Events = result.await?;
 
         Ok(events)
+    }
+
+    pub async fn send_tx(&self, tx_data: String) {
+        let key = SecretKey::from_str("6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c").unwrap();
+        self.contract.signed_call("transact", hex::decode(tx_data).unwrap(), Options::default(), &key).await.unwrap();
     }
 }

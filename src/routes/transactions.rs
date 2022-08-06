@@ -5,25 +5,20 @@ use actix_web::{
     web::{self, Data},
     HttpResponse, ResponseError,
 };
+use ethabi::ethereum_types::U256;
 use kvdb::{DBKey, DBTransaction, KeyValueDB};
 use serde::{Deserialize, Serialize};
 
 use kvdb::DBOp::Insert;
 use libzeropool::fawkes_crypto::{
-    backend::bellman_groth16::{
-        engines::Bn256,
-        prover,
-        verifier,
-    },
+    backend::bellman_groth16::{engines::Bn256, prover, verifier},
     engines::bn256::Fr,
     ff_uint::Num,
 };
 
-use crate::{
-    state::{Job, State, JobStatus},
-};
-use uuid::Uuid;
+use crate::{state::{Job, JobStatus, JobsDbColumn, State}, helpers::serialize};
 use memo_parser::{self, memo::Memo, memo::TxType};
+use uuid::Uuid;
 extern crate hex;
 #[derive(Debug)]
 pub enum ServiceError {
@@ -46,7 +41,6 @@ pub struct TransactionRequest {
     pub tx_type: String,
     pub deposit_signature: String,
 }
-
 
 #[derive(Serialize)]
 pub struct Response {
@@ -103,14 +97,14 @@ pub async fn transact<D: KeyValueDB>(
 
     // 1. check nullifier for double spend
 
-    let nullifier = transaction_request.proof.inputs[1].to_string();
+    let nullifier = transaction_request.proof.inputs[1];
     tracing::info!(
         "request_id: {}, Checking Nullifier {:#?}",
         request_id,
         nullifier
     );
     let pool = &state.pool;
-    if !pool.check_nullifier(&nullifier).await.unwrap() {
+    if !pool.check_nullifier(&nullifier.to_string()).await.unwrap() {
         let error_message = format!(
             "request_id: {}, Nullifier {:#?} , Double spending detected",
             request_id, &nullifier
@@ -132,7 +126,8 @@ pub async fn transact<D: KeyValueDB>(
         "0003" => TxType::DepositPermittable,
         _ => TxType::Deposit,
     };
-    let parsed_memo = Memo::parse_memoblock(tx_memo_bytes.unwrap(), tx_type);
+    let parsed_memo = Memo::parse_memoblock(&tx_memo_bytes.unwrap(), tx_type);
+
     if parsed_memo.fee <= state.web3.relayer_fee {
         tracing::warn!(
             "request_id: {}, fee {:#?} , Fee too low!",
@@ -142,9 +137,7 @@ pub async fn transact<D: KeyValueDB>(
         return Err(ServiceError::BadRequest("Fee too low!".to_owned()));
     }
 
-    // check proof validity
-
-    // 3. Check proof
+    // 3. Check proof validity
     if !verifier::verify(
         &state.vk,
         &transaction_request.proof.proof,
@@ -154,30 +147,49 @@ pub async fn transact<D: KeyValueDB>(
         return Err(ServiceError::BadRequest("Invalid proof".to_owned()));
     }
 
-    //TODO:  3 calculate new virtual state root
-    let mut pending_tree = state.pending.lock().unwrap();
-    pending_tree.append_hash(transaction_request.proof.inputs[2], false);
-    let virtual_state_root = pending_tree.get_root();
+    let commitment = transaction_request.proof.inputs[2];
 
     // send to channel for further processing
     let created = SystemTime::now();
+
+    let nullifier_key = DBKey::from_slice(&serialize(nullifier).unwrap());
+
     let job = Job {
+        id: request_id.as_hyphenated().to_string(),
         created,
         status: JobStatus::Created,
         transaction_request: Some(transaction_request),
-        transaction: None
+        transaction: None,
+        index: 0,
+        commitment,
+        nullifier,
+        root: None,
     };
 
     state.jobs.write(DBTransaction {
-        ops: vec![Insert {
-            col: 0,
-            key: DBKey::from_vec(request_id.as_bytes().to_vec()),
-            value: serde_json::to_string(&job).unwrap().as_bytes().to_vec(),
-        }],
+        ops: vec![
+            /*
+            Saving Job info with transaction request to be later retrieved by client
+            In case of rollback an existing row is mutated
+            TODO: use Borsh instead of JSON
+            */
+            Insert {
+                col: JobsDbColumn::Jobs as u32,
+                key: DBKey::from_vec(request_id.as_bytes().to_vec()),
+                value: serde_json::to_string(&job).unwrap().as_bytes().to_vec(),
+            },
+            /*
+            Saving nullifiers to avoid double spend spam-atack.
+            Nullifiers are stored to persistent DB, if rollback happens, they get deleted individually
+             */
+            Insert {
+                col: JobsDbColumn::Nullifiers as u32,
+                key: nullifier_key,
+                value: vec![],
+            },
+        ],
     })?;
     state.sender.send(Data::new(job)).await.unwrap();
-
-    //TODO:   4 generate UUID for request and save to in-memory map
 
     let body = serde_json::to_string(&Response {
         job_id: request_id.as_hyphenated().to_string(),

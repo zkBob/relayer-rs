@@ -2,7 +2,7 @@ use crate::{
     configuration::Settings,
     contracts::Pool,
     routes::transactions::{query, transact},
-    state::{Job, State, DB},
+    state::{Job, State, DB, JobsDbColumn, JobStatus}, tx_checker::check_tx,
 };
 
 use actix_web::{
@@ -15,7 +15,7 @@ use kvdb::KeyValueDB;
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier::VK};
 
-use std::net::TcpListener;
+use std::{net::TcpListener, time::{SystemTime, Duration}, thread::sleep};
 use tokio::sync::mpsc::Sender;
 
 pub struct Application<D: 'static + KeyValueDB> {
