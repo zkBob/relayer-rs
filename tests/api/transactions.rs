@@ -118,16 +118,14 @@ async fn test_finalize() {
             let job:Job = serde_json::from_slice(&job_as_bytes).unwrap();
             tracing::info!("retrieved {} \t {:#?}", hex::encode(key), job.transaction.unwrap().hash);
     }
-
-    let tx_hash_as_bytes =
-        &hex::decode("2b1673b1759f7db0480273a6360dee57668ff301c578bc3d5843271d1c818ac7").unwrap()[..];
         
-    let job_as_bytes = app
+    let (id, job_as_bytes) = app
         .state
         .jobs
-        .get(JobsDbColumn::Jobs as u32, tx_hash_as_bytes)
-        .unwrap()
+        .iter(JobsDbColumn::Jobs as u32)
+        .next()
         .unwrap();
+
 
     let mut job: Job = serde_json::from_slice(&job_as_bytes).unwrap();
 
@@ -135,7 +133,7 @@ async fn test_finalize() {
 
     app.state.jobs.transaction().put(
         JobsDbColumn::Jobs as u32,
-        tx_hash_as_bytes,
+        &id,
         serde_json::to_string(&job).unwrap().as_bytes(),
     );
 

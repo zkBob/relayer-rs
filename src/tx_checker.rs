@@ -57,9 +57,6 @@ pub async fn check_tx<D: KeyValueDB>(
                 tx_receipt.block_number.unwrap()
             );
 
-            let tx_request = job.transaction_request.as_ref().unwrap();
-
-            // let tx = job.transaction.as_ref().unwrap();
 
             let mut finalized = state.finalized.lock().unwrap();
             {
@@ -75,7 +72,7 @@ pub async fn check_tx<D: KeyValueDB>(
 
             jobs.transaction().put(
                 JobsDbColumn::Jobs as u32,
-                &DBKey::from_slice(tx_request.uuid.as_ref().unwrap().as_bytes()),
+                job.id.as_bytes(),
                 &serde_json::to_vec(&job).unwrap(),
             );
             return Ok(JobStatus::Done);
