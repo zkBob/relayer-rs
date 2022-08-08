@@ -5,6 +5,7 @@ use std::sync::mpsc::Sender;
 use actix_web::web::Data;
 use kvdb_memorydb::InMemory;
 
+use libzeropool::circuit::account;
 use libzeropool::fawkes_crypto::backend::bellman_groth16::verifier::VK;
 use libzeropool::native::params::PoolBN256;
 use libzeropool::POOL_PARAMS;
@@ -151,6 +152,12 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
             if let Some(transaction_request) = &job.transaction_request {
                 let transport = web3::transports::Http::new("HTTP://0.0.0.0:8545").unwrap();
                 let web3 = web3::Web3::new(transport);
+
+
+                let accounts = web3.eth().accounts().await;
+                tracing::info!("accounts: {:#?}", accounts.unwrap());
+
+                
                 let prvk = SecretKey::from_str("4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d").expect("Bad private key!");
                 let serialized_tx = serde_json::to_string(&transaction_request).expect("Tx serialization failed!");
                 let to = _state.pool.contract.address();
