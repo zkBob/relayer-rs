@@ -1,4 +1,5 @@
 use crate::helpers::spawn_app;
+use actix_rt::time::sleep;
 use kvdb::KeyValueDB;
 use libzeropool::constants::OUT;
 use relayer_rs::routes::transactions::TransactionRequest;
@@ -76,6 +77,8 @@ async fn gen_tx_and_send() {
     let finalized =test_app.state.finalized.lock().unwrap();{ 
         assert_eq!(finalized.next_index(), 0 as u64);
     }
+
+    sleep(std::time::Duration::from_secs(5)).await;
 
 }
 
