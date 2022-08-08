@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Mutex;
 use std::sync::mpsc::Sender;
 
@@ -13,6 +14,7 @@ use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::startup::Application;
 use relayer_rs::state::{Job, State};
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
+use secp256k1::SecretKey;
 use tokio::sync::mpsc;
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::setup;
@@ -23,6 +25,7 @@ use libzeropool::{
         engines::bn256::Fr,
     },
 };
+use web3::types::{TransactionParameters, Bytes};
 
 use crate::generator::Generator;
 use libzeropool::fawkes_crypto::circuit::cs::CS;
@@ -121,6 +124,7 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
             .map(|p| p.get_vk())
             .unwrap_or(prebuilt_vk)
     });
+    let pending_clone = pending.clone();
 
     let app = Application::build(
         config.clone(),
@@ -140,11 +144,24 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
 
     let address = format!("http://127.0.0.1:{}", port);
 
+    let _state = app.state.clone();
     tokio::spawn(async move {
-        tracing::info!("starting Receiver for Jobs channel");
+        tracing::info!("starting receiver");
         while let Some(job) = tree_prover_receiver.recv().await {
-            if let Some(transaction_request) = job.transaction_request.as_ref() {
-                tracing::info!("Received tx {:#?}", transaction_request);
+            if let Some(transaction_request) = &job.transaction_request {
+                let transport = web3::transports::Http::new("HTTP://0.0.0.0:8545").unwrap();
+                let web3 = web3::Web3::new(transport);
+                let prvk = SecretKey::from_str("4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d").expect("Bad private key!");
+                let serialized_tx = serde_json::to_string(&transaction_request).expect("Tx serialization failed!");
+                let to = _state.pool.contract.address();
+                let tx_object = TransactionParameters {
+                    to: Some(to),
+                    data: Bytes::from(serialized_tx),
+                    ..Default::default()
+                };
+                let signed = web3.accounts().sign_transaction(tx_object, &prvk).await.expect("Sign failed!");
+                let result = web3.eth().send_raw_transaction(signed.raw_transaction).await;
+                tracing::info!("Tx succeeded with hash: {}", result.unwrap());
             }
         }
     });
