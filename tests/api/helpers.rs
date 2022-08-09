@@ -24,6 +24,7 @@ use libzeropool::{
         engines::bn256::Fr,
     },
 };
+use wiremock::MockServer;
 
 use crate::generator::Generator;
 use libzeropool::fawkes_crypto::circuit::cs::CS;
@@ -33,6 +34,7 @@ pub struct TestApp {
     pub port: u16,
     pub state: Data<State<InMemory>>,
     pub generator: Option<Generator>, // pub pool: Pool
+    pub mock_server: MockServer,
 }
 type DB = Data<Mutex<MerkleTree<InMemory, PoolBN256>>>;
 
@@ -107,7 +109,7 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
 
     let jobs = Data::new(kvdb_memorydb::create(3));
     /*
-    0 - jobs 
+    0 - jobs
     1 - nullifiers
     2 - tx to check receipt ( can't query jobs by status )
      */
@@ -122,7 +124,6 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
             .map(|p| p.get_vk())
             .unwrap_or(prebuilt_vk)
     });
-
 
     let pending_clone = pending.clone();
 
@@ -144,28 +145,28 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
 
     let address = format!("http://127.0.0.1:{}", port);
 
-    let tree_params = config.application.get_tree_params();
+    let listener = std::net::TcpListener::bind("0.0.0.0:8546").expect("failed to start listener");
 
-    
+    let mock_server = MockServer::builder().listener(listener).start().await;
+
+    let tree_params = config.application.get_tree_params();
 
     tokio::spawn(async move {
         tracing::info!("starting receiver");
-        
+
         while let Some(job) = tree_prover_receiver.recv().await {
             let _tx_data = {
                 let mut p = pending_clone.lock().unwrap();
                 let tx_data = tx::build(&job, &p, &tree_params);
-                
+
                 let transaction_request = job.transaction_request.as_ref().unwrap();
                 p.append_hash(transaction_request.proof.inputs[2], false);
-                
+
                 tx_data
             };
             // pool.send_tx(tx_data).await;
-            
         }
     });
-
 
     tokio::spawn(app.run_untill_stopped());
 
@@ -174,6 +175,7 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
         address,
         port,
         state,
-        generator
+        generator,
+        mock_server
     })
 }

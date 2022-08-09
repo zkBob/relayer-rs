@@ -38,7 +38,6 @@ pub fn start_poller<D: KeyValueDB>(state: &Data<State<D>>) -> () {
 
 pub async fn check_tx<D: KeyValueDB>(
     mut job: Job,
-    // pool: Data<Pool>,
     state: Data<State<D>>,
 ) -> Result<JobStatus, std::io::Error> {
 

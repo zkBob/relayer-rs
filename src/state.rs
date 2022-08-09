@@ -44,7 +44,7 @@ impl From<web3::contract::Error> for SyncError {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq,Debug, Serialize, Deserialize)]
 pub enum JobStatus {
     Created,
     Proving,
@@ -108,11 +108,13 @@ impl<D: 'static + KeyValueDB> State<D> {
                     .collect();
                 tracing::debug!("mising indices: {:?}", missing_indices);
 
-                for event in pool
-                    .get_events(Some(BlockNumber::Earliest), Some(BlockNumber::Latest), None)
-                    .await
-                    .unwrap()
-                    .iter()
+                let events = pool
+                .get_events(Some(BlockNumber::Earliest), Some(BlockNumber::Latest), None)
+                .await
+                .unwrap();
+
+                std::fs::write("tests/data/events.json", serde_json::to_string(&events).unwrap()).unwrap();
+                for event in events.iter()
                 {
                     let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
                     if let Some(tx_hash) = event.transaction_hash {

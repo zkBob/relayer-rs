@@ -89,7 +89,8 @@ pub fn get_config() -> Result<Settings, config::ConfigError> {
 pub enum Environment {
     Local,
     Production,
-    Kovan
+    Kovan,
+    Mock
 }
 
 impl Environment {
@@ -98,6 +99,8 @@ impl Environment {
             Environment::Local => "local.yaml",
             Environment::Kovan => "kovan.yaml",
             Environment::Production => "production.yaml",
+            Environment::Mock => "mock.yaml",
+
         }
     }
 }
@@ -110,6 +113,7 @@ impl TryFrom<String> for Environment {
             "local" => Ok(Self::Local),
             "production" => Ok(Self::Production),
             "kovan" => Ok(Self::Kovan),
+            "mock" => Ok(Self::Mock),
             _other => Err(format!("failed to parse {}", s)),
         }
     }
