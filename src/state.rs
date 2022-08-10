@@ -1,10 +1,13 @@
-use std::{sync::Mutex, time::{SystemTime, Duration}, thread::sleep};
+use std::{
+    sync::Mutex,
+    thread::sleep,
+    time::{Duration, SystemTime},
+};
 
 use actix_web::web::{self, Data};
-use ethabi::ethereum_types::U256;
 use kvdb::{DBOp::Insert, DBTransaction, KeyValueDB};
 use libzeropool::{
-    constants::{OUT, OUTPLUSONELOG},
+    constants::OUT,
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, verifier::VK},
         engines::bn256::Fr,
@@ -20,7 +23,8 @@ use uuid::Uuid;
 use web3::types::{BlockNumber, Transaction as Web3Transaction};
 
 use crate::{
-    configuration::Web3Settings, contracts::Pool, routes::transactions::TransactionRequest, tx_checker::check_tx,
+    configuration::Web3Settings, contracts::Pool, routes::transactions::TransactionRequest,
+    tx_checker::check_tx,
 };
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -44,13 +48,13 @@ impl From<web3::contract::Error> for SyncError {
     }
 }
 
-#[derive(Eq, PartialEq,Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum JobStatus {
-    Created,
-    Proving,
-    Mining,
-    Done,
-    Rejected,
+    Created = 0,
+    Proving = 1,
+    Mining = 2,
+    Done = 3,
+    Rejected = 4,
 }
 
 pub enum JobsDbColumn {
@@ -90,32 +94,36 @@ pub struct State<D: 'static + KeyValueDB> {
 
 impl<D: 'static + KeyValueDB> State<D> {
     pub async fn sync(&self) -> Result<(), SyncError> {
-        let mut db = self.finalized.lock().expect("failed to acquire lock");
+        let mut finalized = self.finalized.lock().expect("failed to acquire lock");
+        let mut pending = self.pending.lock().expect("failed to acquire lock");
 
         {
             let pool = &self.pool;
             let (contract_index, contract_root) = pool.root().await?;
-            let local_root = db.get_root();
-            let local_index = db.next_index();
-            tracing::debug!("local root {}", local_root.to_string());
+            let local_finalized_root = finalized.get_root();
+            let local_finalized_index = finalized.next_index();
+            tracing::debug!("local root {}", local_finalized_root.to_string());
             tracing::debug!("contract root {}", contract_root.to_string());
 
-            if !local_root.eq(&contract_root) {
-                let missing_indices: Vec<u64> = (local_index..contract_index.as_u64())
+            if !local_finalized_root.eq(&contract_root) {
+                let missing_indices: Vec<u64> = (local_finalized_index..contract_index.as_u64())
                     .step_by(OUT + 1)
                     .into_iter()
-                    .map(|i| local_index + (i + 1) * (OUT as u64 + 1))
+                    .map(|i| local_finalized_index + (i + 1) * (OUT as u64 + 1))
                     .collect();
                 tracing::debug!("mising indices: {:?}", missing_indices);
 
                 let events = pool
-                .get_events(Some(BlockNumber::Earliest), Some(BlockNumber::Latest), None)
-                .await
-                .unwrap();
+                    .get_events(Some(BlockNumber::Earliest), Some(BlockNumber::Latest), None)
+                    .await
+                    .unwrap();
 
-                std::fs::write("tests/data/events.json", serde_json::to_string(&events).unwrap()).unwrap();
-                for event in events.iter()
-                {
+                std::fs::write(
+                    "tests/data/events.json",
+                    serde_json::to_string(&events).unwrap(),
+                )
+                .unwrap();
+                for event in events.iter() {
                     let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
                     if let Some(tx_hash) = event.transaction_hash {
                         if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
@@ -126,19 +134,26 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 Uint::from_big_endian(&calldata.out_commit),
                             ));
                             tracing::debug!("index: {}, commit {}", index, commitment.to_string());
-                            db.add_leafs_and_commitments(vec![], vec![(index, commitment)]);
-                            tracing::debug!("local root {:#?}", db.get_root().to_string());
+                            finalized.add_leafs_and_commitments(vec![], vec![(index, commitment)]);
+
+                            if pending.next_index() <= index {
+                                pending
+                                    .add_leafs_and_commitments(vec![], vec![(index, commitment)]);
+                            }
+
+                            tracing::debug!(
+                                "root:\n\tpending:{:#?}\n\tfinalized:{:#?}",
+                                pending.get_root().to_string(),
+                                finalized.get_root().to_string()
+                            );
 
                             use kvdb::DBKey;
 
-
-                            let nullifier:Num<Fr> = Num::from_uint_reduced(NumRepr(
+                            let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
                                 Uint::from_big_endian(&calldata.nullifier),
                             ));
 
-
                             let job_id = Uuid::new_v4();
-                            
 
                             let job = Job {
                                 id: job_id.as_hyphenated().to_string(),
@@ -152,11 +167,9 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 root: None,
                             };
 
-
-                            tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash) );
+                            tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash));
                             let db_transaction = DBTransaction {
                                 ops: vec![Insert {
-
                                     col: JobsDbColumn::Jobs as u32,
                                     key: DBKey::from_vec(job_id.as_bytes().to_vec()),
 
@@ -169,14 +182,18 @@ impl<D: 'static + KeyValueDB> State<D> {
                 }
             }
 
-            tracing::debug!("local root after sync {:#?}", db.get_root().to_string());
+            tracing::info!(
+                "local finalized root after sync {:#?}, index : {}",
+                finalized.get_root().to_string(),
+                finalized.next_index()
+            );
+
         }
 
         Ok(())
     }
 
     pub fn start_poller(self) -> () {
-    
         let jobs: Vec<Job> = self
             .jobs
             .iter(JobsDbColumn::TxCheckTasks as u32)
@@ -200,5 +217,4 @@ impl<D: 'static + KeyValueDB> State<D> {
             sleep(Duration::from_secs(5));
         });
     }
-
 }
