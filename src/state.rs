@@ -171,7 +171,9 @@ impl<D: 'static + KeyValueDB> State<D> {
                             let db_transaction = DBTransaction {
                                 ops: vec![Insert {
                                     col: JobsDbColumn::Jobs as u32,
-                                    key: DBKey::from_vec(job_id.as_bytes().to_vec()),
+                                    key: DBKey::from_vec(
+                                        job_id.as_hyphenated().to_string().as_bytes().to_vec(),
+                                    ),
 
                                     value: serde_json::to_vec(&job).unwrap(),
                                 }],
@@ -187,7 +189,6 @@ impl<D: 'static + KeyValueDB> State<D> {
                 finalized.get_root().to_string(),
                 finalized.next_index()
             );
-
         }
 
         Ok(())

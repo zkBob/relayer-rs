@@ -366,18 +366,38 @@ async fn test_rollback() {
         let tx = job.transaction;
 
         tracing::info!(
-            "retrieved {} \t {:#?}",
-            hex::encode(&id),
+            "updating status for {} \t {:#?}",
+            String::from_utf8(id.to_vec()).unwrap(),
             tx.as_ref().unwrap().hash
         );
 
         let mut job: Job = serde_json::from_slice(&job_as_bytes).unwrap();
+        
         job.status = JobStatus::Mining;
 
         app.state.jobs.transaction().put(
             JobsDbColumn::Jobs as u32,
             &id,
             serde_json::to_string(&job).unwrap().as_bytes(),
+        );
+
+        
+        let status_from_db = serde_json::from_slice::<Job>(
+            &app.state
+                .jobs
+                .get(JobsDbColumn::Jobs as u32, &id)
+                .unwrap()
+                .unwrap()[..],
+        )
+        .unwrap().status;
+        // tracing::warn!("The status in the DB {:?}", );
+
+        assert_eq!(job.status, status_from_db);
+
+        tracing::info!(
+            "saved {} \t with status {:#?}",
+            String::from_utf8(id.to_vec()).unwrap(),
+            job.status
         );
     }
 
@@ -389,7 +409,6 @@ async fn test_rollback() {
         .unwrap();
     let last_job: Job = serde_json::from_slice(&last_job).unwrap();
 
-    tracing::info!("here");
     {
         let pending = app.state.pending.lock().unwrap();
 
@@ -402,7 +421,27 @@ async fn test_rollback() {
         assert_eq!(finalized.next_index(), 0 as u64);
     }
 
-    tracing::info!("here 2");
+    app.state
+        .jobs
+        .iter(JobsDbColumn::Jobs as u32)
+        .for_each(|(k, v)| {
+            let job: Job = serde_json::from_slice(&v).unwrap();
+            let key = String::from_utf8(k.to_vec()).unwrap();
+            tracing::info!("checking job {}  with status {:#?}", job.id, job.status);
+
+            assert_eq!(key, job.id);
+
+            assert_eq!(job.status, JobStatus::Mining);
+        });
+
+    // assert!(app
+    //     .state
+    //     .jobs
+    //     .iter(JobsDbColumn::Jobs as u32)
+    //     .all(|(_, v)| {
+    //         let job: Job = serde_json::from_slice(&v).unwrap();
+    //         job.status == JobStatus::Mining
+    //     }), "all jobs are must be in Mining state");
 
     match check_tx(last_job, state).await {
         Ok(status) => tracing::debug!("check_tx complete {:#?}", status),
@@ -435,14 +474,16 @@ async fn test_rollback() {
         assert_eq!(finalized.next_index(), 0 as u64);
     }
 
-    assert!(app
-        .state
-        .jobs
-        .iter(JobsDbColumn::Jobs as u32)
-        .all(|(_, v)| {
-            let job: Job = serde_json::from_slice(&v).unwrap();
-            job.status == JobStatus::Rejected
-        }));
+    assert!(
+        app.state
+            .jobs
+            .iter(JobsDbColumn::Jobs as u32)
+            .all(|(_, v)| {
+                let job: Job = serde_json::from_slice(&v).unwrap();
+                job.status == JobStatus::Rejected
+            }),
+        "all job must be rejected "
+    );
 }
 
 #[actix_rt::test]
