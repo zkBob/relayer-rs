@@ -1,26 +1,16 @@
-use std::{
-    ops::Deref,
-    str::FromStr,
-    thread::sleep,
-    time::{Duration, SystemTime},
-};
-
-use crate::helpers::{spawn_app, TestApp};
-use actix_rt::net::TcpListener;
-use actix_web::web::Data;
-use ethabi::ethereum_types::{H160, H256, U256, U64};
-use kvdb::{DBKey, KeyValueDB};
-use libzeropool::{constants::OUT, fawkes_crypto::ff_uint::NumRepr, native::tx::tx_hash};
+use crate::helpers::spawn_app;
+use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
+use libzeropool::constants::OUT;
 use relayer_rs::{
     routes::transactions::TransactionRequest,
     state::{Job, JobStatus, JobsDbColumn},
-    tx_checker::{check_tx, start_poller},
+    tx_checker::check_tx,
 };
 
 use serde_json::{json, Value};
-use web3::types::{BlockNumber, Bytes, LogWithMeta, Transaction};
-use wiremock::matchers::{body_string_contains, method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use web3::types::BlockNumber;
+use wiremock::matchers::{body_string_contains, method};
+use wiremock::{Mock, ResponseTemplate};
 
 #[actix_rt::test]
 async fn get_transactions_works() {
@@ -169,83 +159,6 @@ async fn test_finalize() {
     assert_eq!(finalized.next_index(), pending.next_index());
 }
 
-async fn setup_mocks(app: &TestApp) {
-    /*
-    Mock two successful events
-     */
-    let _mock = Mock::given(method("POST"))
-        .and(body_string_contains("eth_getLogs"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(std::fs::read_to_string("tests/data/logs.json").unwrap()),
-        )
-        .mount_as_scoped(&app.mock_server)
-        .await;
-
-    let eth_call_response = json!({"id":0,"jsonrpc":"2.0","result":"0x0000000000000000000000000000000000000000000000000000000000000100"});
-
-    /*
-    Mock current pool contract root
-     */
-    Mock::given(method("POST"))
-        .and(body_string_contains("eth_call"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(&eth_call_response))
-        .mount(&app.mock_server)
-        .await;
-
-    /*
-    Mock both transaction content and receipt
-     */
-    Mock::given(method("POST"))
-        .and(body_string_contains("eth_getTransactionByHash"))
-        .and(body_string_contains(
-            "0x2b1673b1759f7db0480273a6360dee57668ff301c578bc3d5843271d1c818ac7",
-        ))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(std::fs::read_to_string("tests/data/0x2b1673b1759f7db0480273a6360dee57668ff301c578bc3d5843271d1c818ac7.json").unwrap()),
-        )
-        .mount(&app.mock_server)
-        .await;
-
-    Mock::given(method("POST"))
-        .and(body_string_contains("eth_getTransactionReceipt"))
-        .and(body_string_contains(
-            "0x2b1673b1759f7db0480273a6360dee57668ff301c578bc3d5843271d1c818ac7",
-        ))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(std::fs::read_to_string("tests/data/r_0x2b1673b1759f7db0480273a6360dee57668ff301c578bc3d5843271d1c818ac7.json").unwrap()),
-        )
-        .mount(&app.mock_server)
-        .await;
-
-    Mock::given(method("POST"))
-        .and(body_string_contains("eth_getTransactionReceipt"))
-        .and(body_string_contains(
-            "0x62a658acb631e785bb4a494781f6411a84bceee685112fbceb3601ded279f6ac",
-        ))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(std::fs::read_to_string("tests/data/r_0x62a658acb631e785bb4a494781f6411a84bceee685112fbceb3601ded279f6ac.json").unwrap()),
-        )
-        .mount(&app.mock_server)
-        .await;
-
-    Mock::given(method("POST"))
-        .and(body_string_contains("eth_getTransactionByHash"))
-        .and(body_string_contains(
-            "0x62a658acb631e785bb4a494781f6411a84bceee685112fbceb3601ded279f6ac",
-        ))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(std::fs::read_to_string("tests/data/0x62a658acb631e785bb4a494781f6411a84bceee685112fbceb3601ded279f6ac.json").unwrap()),
-        )
-        .mount(&app.mock_server)
-        .await;
-
-    tracing::info!("mocks registered");
-}
 
 #[actix_rt::test]
 async fn test_rollback() {
@@ -283,7 +196,7 @@ async fn test_rollback() {
         .await;
 
     /*
-    Mock both transaction content and receipt
+    Mock both transaction content and receipt to sync DB
      */
     Mock::given(method("POST"))
         .and(body_string_contains("eth_getTransactionByHash"))
@@ -354,31 +267,39 @@ async fn test_rollback() {
         }
     }
 
+    // Rollback finalized state manually to simulate a gap between pending and finalized state
     {
         let mut finalized = app.state.finalized.lock().unwrap();
 
         finalized.rollback(0 as u64);
     }
 
+    // Mutate received jobs to simulate processing, bot jobs get mining state and a corresponding key among scheduled checks (TxCheckTasks) 
     for (id, job_as_bytes) in app.state.jobs.iter(JobsDbColumn::Jobs as u32) {
-        let job: Job = serde_json::from_slice(&job_as_bytes).unwrap();
-
-        let tx = job.transaction;
-
-        tracing::info!(
-            "retrieved {} \t {:#?}",
-            hex::encode(&id),
-            tx.as_ref().unwrap().hash
-        );
 
         let mut job: Job = serde_json::from_slice(&job_as_bytes).unwrap();
+
         job.status = JobStatus::Mining;
 
-        app.state.jobs.transaction().put(
-            JobsDbColumn::Jobs as u32,
-            &id,
-            serde_json::to_string(&job).unwrap().as_bytes(),
-        );
+        let key = DBKey::from_slice(&id);
+
+        app.state
+            .jobs
+            .write(DBTransaction {
+                ops: vec![
+                    DBOp::Insert {
+                        col: JobsDbColumn::Jobs as u32,
+                        key: DBKey::from_slice(&id),
+                        value: serde_json::to_string(&job).unwrap().as_bytes().to_vec(),
+                    },
+                    DBOp::Insert {
+                        col: JobsDbColumn::TxCheckTasks as u32,
+                        key,
+                        value: vec![],
+                    },
+                ],
+            })
+            .unwrap();
     }
 
     let (_id, last_job) = app
@@ -387,25 +308,35 @@ async fn test_rollback() {
         .iter(JobsDbColumn::Jobs as u32)
         .next()
         .unwrap();
+
     let last_job: Job = serde_json::from_slice(&last_job).unwrap();
 
-    tracing::info!("here");
     {
         let pending = app.state.pending.lock().unwrap();
 
-        assert_eq!(pending.next_index(), 256 as u64);
+        assert_eq!(pending.next_index(), 256 as u64, "wrong index after sync");
     }
 
     {
         let finalized = app.state.finalized.lock().unwrap();
 
-        assert_eq!(finalized.next_index(), 0 as u64);
+        assert_eq!(finalized.next_index(), 0 as u64, "finalized db must be at vanilla state");
     }
 
-    tracing::info!("here 2");
+    assert!(
+        app.state
+            .jobs
+            .iter(JobsDbColumn::Jobs as u32)
+            .all(|(_, v)| {
+                let job: Job = serde_json::from_slice(&v).unwrap();
+                job.status == JobStatus::Mining
+            }),
+        "all job must have been set to Mining status "
+    );
+
 
     match check_tx(last_job, state).await {
-        Ok(status) => tracing::debug!("check_tx complete {:#?}", status),
+        Ok(status) => tracing::info!("check_tx result: {:#?}", status),
         Err(e) => {
             tracing::error!("error whilst check_tx {:?}", e);
             for request in app
@@ -435,14 +366,16 @@ async fn test_rollback() {
         assert_eq!(finalized.next_index(), 0 as u64);
     }
 
-    assert!(app
-        .state
-        .jobs
-        .iter(JobsDbColumn::Jobs as u32)
-        .all(|(_, v)| {
-            let job: Job = serde_json::from_slice(&v).unwrap();
-            job.status == JobStatus::Rejected
-        }));
+    assert!(
+        app.state
+            .jobs
+            .iter(JobsDbColumn::Jobs as u32)
+            .all(|(_, v)| {
+                let job: Job = serde_json::from_slice(&v).unwrap();
+                job.status == JobStatus::Rejected
+            }),
+        "all job must have been rejected "
+    );
 }
 
 #[actix_rt::test]

@@ -5,7 +5,6 @@ use actix_web::{
     web::{self, Data},
     HttpResponse, ResponseError,
 };
-use ethabi::ethereum_types::U256;
 use kvdb::{DBKey, DBTransaction, KeyValueDB};
 use serde::{Deserialize, Serialize};
 

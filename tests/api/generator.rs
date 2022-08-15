@@ -20,7 +20,7 @@ use secp256k1::SecretKey;
 use uuid::Uuid;
 
 // use std::{env, thread};
-use std::{fs, str::FromStr};
+use std::{str::FromStr};
 use web3::{api::Accounts, types::SignedData};
 
 use crate::utils::TestError;
