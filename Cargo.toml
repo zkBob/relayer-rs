@@ -8,11 +8,13 @@ edition = "2021"
 [dependencies]
 serde = { version = "1.0.130", features = ["derive"] }
 actix-web = "=4.0.1"
+actix-cors="0.6.2"
 actix-http = "=3.0.4"
 config = "0.11.0"
 serde-aux = "2.3.0"
 #web3="0.18.0" https://github.com/tomusdrw/rust-web3/pull/651
-web3={git = "https://github.com/r0wdy1/rust-web3", branch = "logs_txhash" }
+#web3={git = "https://github.com/r0wdy1/rust-web3", branch = "logs_txhash" }
+web3={path = "../rust-web3"}
 tokio={version="1.17", features=["rt","rt-multi-thread","sync"]}
 libzeropool = { version = "0.5.3", default-features = false, features = ["in3out127"] }
 borsh = "0.9.1"

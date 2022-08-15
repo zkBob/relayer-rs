@@ -80,13 +80,14 @@ pub async fn query() -> Result<HttpResponse, ServiceError> {
 }
 
 pub async fn transact<D: KeyValueDB>(
-    request: web::Json<TransactionRequest>,
+    request: web::Json<Vec<TransactionRequest>>,
     state: Data<State<D>>, // sender: web::Data<Sender<Data<Job>>>,
                            // vk: web::Data<VK<Bn256>>,
                            // web3_settings: web::Data<Web3Settings>,
                            // application_settings: web::Data<ApplicationSettings>,
 ) -> Result<HttpResponse, ServiceError> {
-    let transaction_request: TransactionRequest = request.0.into();
+    let mut transaction_requests: Vec<TransactionRequest> = request.0.into();
+    let transaction_request = transaction_requests.pop().unwrap();
 
     let request_id = transaction_request
         .uuid
@@ -126,6 +127,7 @@ pub async fn transact<D: KeyValueDB>(
         _ => TxType::Deposit,
     };
     let parsed_memo = Memo::parse_memoblock(&tx_memo_bytes.unwrap(), tx_type);
+
     if parsed_memo.fee < state.web3.relayer_fee {
         tracing::warn!(
             "request_id: {}, fee {:#?} , Fee too low!",

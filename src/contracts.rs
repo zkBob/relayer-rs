@@ -151,17 +151,37 @@ impl Pool {
     }
 
     pub async fn send_tx(&self, tx_data: String) {
+        let _ = env_logger::try_init();
+        let short_signature = self.contract.abi().function("transact").unwrap().short_signature().to_vec();
+        let fn_data: Vec<u8> = short_signature.into_iter().chain(hex::decode(tx_data).unwrap().into_iter()).collect();
+        
         let key =
             SecretKey::from_str("6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c")
                 .unwrap();
-        self.contract
-            .signed_call(
-                "transact",
-                hex::decode(tx_data).unwrap(),
-                Options::default(),
-                &key,
-            )
-            .await
-            .unwrap();
+
+        tracing::info!("fn_data {:#?}", hex::encode(&fn_data)); 
+        let options = Options {
+            // Fixed gas limit
+            gas: Some(U256::from_dec_str("2000000").unwrap()),
+            // Fixed gas price
+            gas_price: Some(U256::from_dec_str("20000000000").unwrap()),
+            // Value to transfer
+            //value: Option<U256>,
+            // Fixed transaction nonce
+            // nonce: Some(U256::from_dec_str("0").unwrap()),
+            // A condition to satisfy before including transaction.
+            //condition: Option<TransactionCondition>,
+            // Transaction type, Some(1) for AccessList transaction, None for Legacy
+            //transaction_type: Option<U64>,
+            // Access list
+            //access_list: Option<AccessList>,
+            // Max fee per gas
+            //max_fee_per_gas: Option<U256>,
+            // miner bribe
+            //max_priority_fee_per_gas: Option<U256>,
+            ..Default::default()
+        };
+        let tx_hash = self.contract.signed_call_raw(fn_data, options, &key).await.unwrap();
+        tracing::info!("tx_hash {:#?}", tx_hash);
     }
 }
