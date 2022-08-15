@@ -40,7 +40,6 @@ pub async fn check_tx<D: KeyValueDB>(
     mut job: Job,
     state: Data<State<D>>,
 ) -> Result<JobStatus, std::io::Error> {
-
     let jobs = &state.jobs;
     let tx_hash = job.transaction.as_ref().unwrap().hash;
     tracing::info!("check for tx {} started", tx_hash);
@@ -55,7 +54,6 @@ pub async fn check_tx<D: KeyValueDB>(
                 "tx was successfully mined at {}",
                 tx_receipt.block_number.unwrap()
             );
-
 
             let mut finalized = state.finalized.lock().unwrap();
             {
@@ -87,6 +85,10 @@ pub async fn check_tx<D: KeyValueDB>(
             // For every OTHER transaction waiting to be mined
             for (request_id, _val) in jobs.iter(JobsDbColumn::TxCheckTasks as u32) {
                 // Retrieve and deserialize Job information
+                tracing::info!(
+                    "rejecting task {:?}",
+                    String::from_utf8(request_id.to_vec()).unwrap()
+                );
                 if let Some(other_job) = jobs.get(JobsDbColumn::Jobs as u32, &request_id).unwrap() {
                     let mut job: Job = serde_json::from_slice(&other_job[..])?;
 

@@ -13,7 +13,6 @@ use relayer_rs::startup::Application;
 use relayer_rs::state::{Job, State};
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
 use relayer_rs::tx;
-use relayer_rs::tx_checker::start_poller;
 use tokio::sync::mpsc;
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::setup;

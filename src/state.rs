@@ -50,17 +50,18 @@ impl From<web3::contract::Error> for SyncError {
 
 #[derive(Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum JobStatus {
-    Created = 0,
-    Proving = 1,
-    Mining = 2,
-    Done = 3,
-    Rejected = 4,
+    Created = 0, //Waiting for provers to get the task
+    Proving = 1, //Generating tree update proofs
+    Mining = 2,  //Waiting for tx receipt
+    Done = 3,    //
+    Rejected = 4,//This transaction or one of the preceeding tx in the queue were reverted
 }
 
 pub enum JobsDbColumn {
     Jobs = 0,
     Nullifiers = 1,
-    TxCheckTasks = 2,
+    TxCheckTasks = 2, // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective, 
+                     //so we copy only those keys that require transaction receipt check
 }
 
 #[derive(Debug, Serialize, Deserialize)]
