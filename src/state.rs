@@ -1,4 +1,8 @@
-use std::{sync::Mutex, time::SystemTime};
+use std::{
+    sync::Mutex,
+    thread::sleep,
+    time::{Duration, SystemTime},
+};
 
 use actix_web::web::{self, Data};
 use kvdb::{DBOp::Insert, DBTransaction, KeyValueDB};
@@ -6,6 +10,7 @@ use libzeropool::{
     constants::OUT,
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, verifier::VK},
+        engines::bn256::Fr,
         ff_uint::{Num, NumRepr, Uint},
     },
     native::params::PoolBN256,
@@ -14,10 +19,12 @@ use libzkbob_rs::merkle::MerkleTree;
 use memo_parser::memoparser;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
+use uuid::Uuid;
 use web3::types::{BlockNumber, Transaction as Web3Transaction};
 
 use crate::{
     configuration::Web3Settings, contracts::Pool, routes::transactions::TransactionRequest,
+    tx_checker::check_tx,
 };
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -41,21 +48,39 @@ impl From<web3::contract::Error> for SyncError {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum JobStatus {
-    Created,
-    Proving,
-    Mining,
-    Done,
-    Rejected,
+    Created = 0, //Waiting for provers to get the task
+    Proving = 1, //Generating tree update proofs
+    Mining = 2,  //Waiting for tx receipt
+    Done = 3,    //
+    Rejected = 4,//This transaction or one of the preceeding tx in the queue were reverted
+}
+
+pub enum JobsDbColumn {
+    Jobs = 0,
+    Nullifiers = 1,
+    TxCheckTasks = 2, // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective, 
+                     //so we copy only those keys that require transaction receipt check
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Job {
+    pub id: String,
     pub created: SystemTime,
     pub status: JobStatus,
     pub transaction_request: Option<TransactionRequest>,
     pub transaction: Option<Web3Transaction>,
+    pub index: u64,
+    pub commitment: Num<Fr>,
+    pub root: Option<Num<Fr>>,
+    pub nullifier: Num<Fr>,
+}
+
+impl Job {
+    pub fn reject(mut self) -> () {
+        self.status = JobStatus::Rejected;
+    }
 }
 
 pub struct State<D: 'static + KeyValueDB> {
@@ -70,71 +95,128 @@ pub struct State<D: 'static + KeyValueDB> {
 
 impl<D: 'static + KeyValueDB> State<D> {
     pub async fn sync(&self) -> Result<(), SyncError> {
-        let mut db = self.finalized.lock().expect("failed to acquire lock");
+        let mut finalized = self.finalized.lock().expect("failed to acquire lock");
+        let mut pending = self.pending.lock().expect("failed to acquire lock");
 
         {
             let pool = &self.pool;
             let (contract_index, contract_root) = pool.root().await?;
-            let local_root = db.get_root();
-            let local_index = db.next_index();
-            tracing::debug!("local root {}", local_root.to_string());
+            let local_finalized_root = finalized.get_root();
+            let local_finalized_index = finalized.next_index();
+            tracing::debug!("local root {}", local_finalized_root.to_string());
             tracing::debug!("contract root {}", contract_root.to_string());
 
-            if !local_root.eq(&contract_root) {
-                let missing_indices: Vec<u64> = (local_index..contract_index.as_u64())
+            if !local_finalized_root.eq(&contract_root) {
+                let missing_indices: Vec<u64> = (local_finalized_index..contract_index.as_u64())
                     .step_by(OUT + 1)
                     .into_iter()
-                    .map(|i| local_index + (i + 1) * (OUT as u64 + 1))
+                    .map(|i| local_finalized_index + (i + 1) * (OUT as u64 + 1))
                     .collect();
                 tracing::debug!("mising indices: {:?}", missing_indices);
 
-                for event in pool
+                let events = pool
                     .get_events(Some(BlockNumber::Earliest), Some(BlockNumber::Latest), None)
                     .await
-                    .unwrap()
-                    .iter()
-                {
-                    let index = event.event_data.0 - 128;
+                    .unwrap();
+
+                std::fs::write(
+                    "tests/data/events.json",
+                    serde_json::to_string(&events).unwrap(),
+                )
+                .unwrap();
+                for event in events.iter() {
+                    let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
                     if let Some(tx_hash) = event.transaction_hash {
                         if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
-                            let calldata = &tx.input.0;
-                            let calldata = memoparser::parse_calldata(hex::encode(calldata), None)
+                            let calldata = memoparser::parse_calldata(&tx.input.0, None)
                                 .expect("Calldata is invalid!");
 
-                            let commit = Num::from_uint_reduced(NumRepr(Uint::from_big_endian(
-                                &calldata.out_commit,
-                            )));
-                            tracing::debug!("index: {}, commit {}", index, commit.to_string());
-                            db.add_leafs_and_commitments(vec![], vec![(index.as_u64(), commit)]);
-                            tracing::debug!("local root {:#?}", db.get_root().to_string());
+                            let commitment = Num::from_uint_reduced(NumRepr(
+                                Uint::from_big_endian(&calldata.out_commit),
+                            ));
+                            tracing::debug!("index: {}, commit {}", index, commitment.to_string());
+                            finalized.add_leafs_and_commitments(vec![], vec![(index, commitment)]);
+
+                            if pending.next_index() <= index {
+                                pending
+                                    .add_leafs_and_commitments(vec![], vec![(index, commitment)]);
+                            }
+
+                            tracing::debug!(
+                                "root:\n\tpending:{:#?}\n\tfinalized:{:#?}",
+                                pending.get_root().to_string(),
+                                finalized.get_root().to_string()
+                            );
 
                             use kvdb::DBKey;
 
+                            let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
+                                Uint::from_big_endian(&calldata.nullifier),
+                            ));
+
+                            let job_id = Uuid::new_v4();
+
                             let job = Job {
+                                id: job_id.as_hyphenated().to_string(),
                                 created: SystemTime::now(),
                                 status: JobStatus::Done,
                                 transaction_request: None,
                                 transaction: Some(tx),
+                                index,
+                                commitment,
+                                nullifier,
+                                root: None,
                             };
 
+                            tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash));
                             let db_transaction = DBTransaction {
                                 ops: vec![Insert {
-                                    col: 0,
-                                    key: DBKey::from_vec(vec![1]),
+                                    col: JobsDbColumn::Jobs as u32,
+                                    key: DBKey::from_vec(
+                                        job_id.as_hyphenated().to_string().as_bytes().to_vec(),
+                                    ),
+
                                     value: serde_json::to_vec(&job).unwrap(),
                                 }],
                             };
                             self.jobs.write(db_transaction)?;
-
-                            //TODO: state.addTx(index, Buffer.from(commitAndMemo, 'hex'))
                         }
                     }
                 }
             }
 
-            tracing::debug!("local root after sync {:#?}", db.get_root().to_string());
+            tracing::info!(
+                "local finalized root after sync {:#?}, index : {}",
+                finalized.get_root().to_string(),
+                finalized.next_index()
+            );
         }
 
         Ok(())
+    }
+
+    pub fn start_poller(self) -> () {
+        let jobs: Vec<Job> = self
+            .jobs
+            .iter(JobsDbColumn::TxCheckTasks as u32)
+            .map(|(_k, v)| serde_json::from_slice(&v[..]).unwrap())
+            .collect();
+        tokio::spawn(async move {
+            let state = Data::new(self);
+            for job in jobs.into_iter() {
+                let state = state.clone();
+                tracing::debug!("polling started at {:?}", SystemTime::now());
+                match check_tx(job, state).await {
+                    Err(_) | Ok(JobStatus::Rejected) => {
+                        tracing::warn!(
+                            "caught error / revert " // TODO: add job id
+                        );
+                        break;
+                    }
+                    _ => (),
+                }
+            }
+            sleep(Duration::from_secs(5));
+        });
     }
 }

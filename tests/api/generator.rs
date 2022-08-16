@@ -17,9 +17,10 @@ use libzkbob_rs::client::{state::State, TxType, UserAccount};
 use rand::Rng;
 
 use secp256k1::SecretKey;
+use uuid::Uuid;
 
 // use std::{env, thread};
-use std::{fs, str::FromStr};
+use std::{str::FromStr};
 use web3::{api::Accounts, types::SignedData};
 
 use crate::utils::TestError;
@@ -100,7 +101,7 @@ impl Generator {
         signed
     }
 
-    pub async fn generate_deposit(&self) -> Result<TransactionRequest, TestError> {
+    pub async fn generate_deposit(&self, uuid: Option<Uuid>) -> Result<TransactionRequest, TestError> {
         let tx_params = self.tx_params.as_ref().expect("need circuit params");
         let state = State::init_test(POOL_PARAMS.clone());
         let acc = UserAccount::new(
@@ -138,7 +139,7 @@ impl Generator {
         let packed_sig = pack_signature(&deposit_signature)?;
 
         Ok(TransactionRequest {
-            uuid: None,
+            uuid: uuid.map(|v| v.as_hyphenated().to_string()),
             proof: Proof { inputs, proof },
             memo: hex::encode(tx_data.memo),
             tx_type: String::from("0000"),

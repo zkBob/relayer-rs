@@ -1,10 +1,14 @@
 use std::str::FromStr;
 
 use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::Num};
+use secp256k1::SecretKey;
 use web3::{
     contract::{Contract, Options},
     transports::Http,
-types::{Transaction, TransactionId, H160, H256, U256, BlockNumber, LogWithMeta, Bytes},
+    types::{
+        BlockNumber, Bytes, FilterBuilder, Log, LogWithMeta, Transaction, TransactionId,
+        TransactionReceipt, H160, H256, U256,
+    },
     Web3,
 };
 
@@ -23,7 +27,6 @@ pub struct Pool {
 fn get_web3(config: &Data<Web3Settings>) -> web3::Web3<Http> {
     let http = web3::transports::Http::new(&config.provider_endpoint)
         .expect("failed to init web3 provider");
-
     web3::Web3::new(http)
 }
 
@@ -33,7 +36,13 @@ impl Pool {
             .eth()
             .transaction(TransactionId::Hash(tx_hash))
             .await
-        // web3
+    }
+
+    pub async fn get_transaction_receipt(
+        &self,
+        tx_hash: H256,
+    ) -> Result<Option<TransactionReceipt>, web3::Error> {
+        self.web3.eth().transaction_receipt(tx_hash).await
     }
 
     pub fn new(config: Data<Web3Settings>) -> Result<Self, SyncError> {
@@ -54,7 +63,7 @@ impl Pool {
     }
 
     pub async fn check_nullifier(&self, nullifier: &str) -> Result<bool, web3::error::Error> {
-        let exists: U256= self
+        let exists: U256 = self
             .contract
             .query(
                 "nullifiers",
@@ -97,5 +106,62 @@ impl Pool {
         let events: Events = result.await?;
 
         Ok(events)
+    }
+
+    pub async fn get_logs(&self) -> Result<Vec<Log>, SyncError> {
+        let res = self.contract.abi().event("Message").and_then(|ev| {
+            let filter = ev.filter(ethabi::RawTopicFilter {
+                topic0: ethabi::Topic::Any,
+                topic1: ethabi::Topic::Any,
+                topic2: ethabi::Topic::Any,
+            })?;
+            Ok((ev.clone(), filter))
+        });
+        let (_ev, filter) = match res {
+            Ok(x) => x,
+            Err(_e) => return Err(SyncError::GeneralError("WTF".to_string())),
+        };
+
+        let address = self.contract.address();
+        tracing::info!("filter {:#?}", filter);
+        tracing::info!("address {:#?}", address);
+
+        let logs = self
+            .web3
+            .eth()
+            .logs(
+                FilterBuilder::default()
+                    .address(vec![self.contract.address()])
+                    .topic_filter(filter)
+                    .from_block(Some(BlockNumber::Earliest))
+                    .to_block(Some(BlockNumber::Latest))
+                    .block_hash(None)
+                    .build(),
+            )
+            .await
+            .unwrap();
+
+        // std::fs::write(
+        //     "tests/data/logs.json",
+        //     serde_json::to_string_pretty(&logs).unwrap(),
+        // )
+        // .unwrap();
+
+        Ok(logs)
+    }
+
+    pub async fn send_tx(&self, tx_data: String) {
+        let key =
+            SecretKey::from_str("6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c")
+                .unwrap();
+        self.contract
+            .signed_call(
+                "transact",
+                hex::decode(tx_data).unwrap(),
+                Options::default(),
+                &key,
+            )
+            .await
+            .unwrap();
     }
 }
