@@ -24,7 +24,7 @@ use web3::types::{BlockNumber, Transaction as Web3Transaction};
 
 use crate::{
     configuration::Web3Settings, contracts::Pool, routes::transactions::TransactionRequest,
-    tx_checker::check_tx,
+    tx_checker::check_tx, helpers::serialize,
 };
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -154,6 +154,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 Uint::from_big_endian(&calldata.nullifier),
                             ));
 
+                            let nullifier_key = DBKey::from_slice(&serialize(nullifier).unwrap());
                             let job_id = Uuid::new_v4();
 
                             let job = Job {
@@ -170,14 +171,20 @@ impl<D: 'static + KeyValueDB> State<D> {
 
                             tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash));
                             let db_transaction = DBTransaction {
-                                ops: vec![Insert {
-                                    col: JobsDbColumn::Jobs as u32,
-                                    key: DBKey::from_vec(
-                                        job_id.as_hyphenated().to_string().as_bytes().to_vec(),
-                                    ),
-
-                                    value: serde_json::to_vec(&job).unwrap(),
-                                }],
+                                ops: vec![
+                                    Insert {
+                                        col: JobsDbColumn::Jobs as u32,
+                                        key: DBKey::from_vec(
+                                            job_id.as_hyphenated().to_string().as_bytes().to_vec(),
+                                        ),
+                                        value: serde_json::to_vec(&job).unwrap(),
+                                    },
+                                    Insert {
+                                        col: JobsDbColumn::Nullifiers as u32,
+                                        key: nullifier_key,
+                                        value: vec![],
+                                    }
+                                ],
                             };
                             self.jobs.write(db_transaction)?;
                         }
