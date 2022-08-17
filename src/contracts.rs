@@ -160,27 +160,14 @@ impl Pool {
                 .unwrap();
 
         tracing::info!("fn_data {:#?}", hex::encode(&fn_data)); 
+
+        // TODO: Make it configurable
         let options = Options {
-            // Fixed gas limit
             gas: Some(U256::from_dec_str("2000000").unwrap()),
-            // Fixed gas price
             gas_price: Some(U256::from_dec_str("20000000000").unwrap()),
-            // Value to transfer
-            //value: Option<U256>,
-            // Fixed transaction nonce
-            // nonce: Some(U256::from_dec_str("0").unwrap()),
-            // A condition to satisfy before including transaction.
-            //condition: Option<TransactionCondition>,
-            // Transaction type, Some(1) for AccessList transaction, None for Legacy
-            //transaction_type: Option<U64>,
-            // Access list
-            //access_list: Option<AccessList>,
-            // Max fee per gas
-            //max_fee_per_gas: Option<U256>,
-            // miner bribe
-            //max_priority_fee_per_gas: Option<U256>,
             ..Default::default()
         };
+        
         let tx_hash = self.contract.signed_call_raw(fn_data, options, &key).await.unwrap();
         tracing::info!("tx_hash {:#?}", tx_hash);
     }

@@ -154,16 +154,16 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
         tracing::info!("starting receiver");
 
         while let Some(job) = tree_prover_receiver.recv().await {
-            let _tx_data = {
+            let tx_data = {
                 let mut p = pending_clone.lock().unwrap();
                 let tx_data = tx::build(&job, &p, &tree_params);
-
+                
                 let transaction_request = job.transaction_request.as_ref().unwrap();
                 p.append_hash(transaction_request.proof.inputs[2], false);
-
+                
                 tx_data
             };
-            // pool.send_tx(tx_data).await;
+            pool.send_tx(tx_data).await;
         }
     });
 
