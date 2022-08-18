@@ -71,8 +71,18 @@ async fn main() -> Result<(), std::io::Error> {
                 
                 tx_data
             };
-            pool.send_tx(tx_data).await;
-            
+
+            tracing::info!("[Job: {}] Sending tx with data: {}", job.id, hex::encode(&tx_data));
+            let tx_hash = pool.send_tx(tx_data).await;
+            match tx_hash {
+                Ok(tx_hash) => {
+                    tracing::info!("[Job: {}] Received tx hash: {:#x}", job.id, tx_hash);
+                    // TODO: send job with tx_hash to next channel
+                },
+                Err(_) => {
+                    // TODO: what should we do in that case?
+                }
+            }
         }
     });
 

@@ -30,7 +30,7 @@ async fn check_root_after_tx() {
 
     let handle = tokio::spawn(async move {
         let response = client
-            .post(format!("{}/transact", app.address))
+            .post(format!("{}/sendTransaction", app.address))
             .body(serde_json::to_string(&tx).unwrap())
             .header("Content-type", "application/json")
             .send()

@@ -28,6 +28,7 @@ pub struct Web3Settings {
     pub abi_path: String,
     pub pool_address: String,
     pub relayer_fee: u64,
+    pub gas_limit: u64,
     #[serde(skip_serializing)]
     pub credentials: Credentials
 }

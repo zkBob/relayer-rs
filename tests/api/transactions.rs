@@ -39,7 +39,7 @@ async fn post_transaction_works() {
     tracing::info!("sending request {:#?}", tx);
 
     let result = client
-        .post(format!("{}/transact", app.address))
+        .post(format!("{}/sendTransaction", app.address))
         .body(serde_json::to_string(&tx).unwrap())
         .header("Content-type", "application/json")
         .send()
@@ -63,7 +63,7 @@ async fn gen_tx_and_send() {
     let client = reqwest::Client::new();
 
     let response = client
-        .post(format!("{}/transact", test_app.address))
+        .post(format!("{}/sendTransaction", test_app.address))
         .body(serde_json::to_string(&tx).unwrap())
         .header("Content-type", "application/json")
         .send()

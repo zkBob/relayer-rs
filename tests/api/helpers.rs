@@ -9,6 +9,7 @@ use libzeropool::POOL_PARAMS;
 use libzkbob_rs::merkle::MerkleTree;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
+use relayer_rs::contracts::Pool;
 use relayer_rs::startup::Application;
 use relayer_rs::state::{Job, State};
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
@@ -149,6 +150,7 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
     let mock_server = MockServer::builder().listener(listener).start().await;
 
     let tree_params = config.application.get_tree_params();
+    let pool = Pool::new(Data::new(config.web3.clone())).expect("failed to instantiate pool contract");
 
     tokio::spawn(async move {
         tracing::info!("starting receiver");
@@ -163,7 +165,18 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
                 
                 tx_data
             };
-            pool.send_tx(tx_data).await;
+            
+            tracing::info!("[Job: {}] Sending tx with data: {}", job.id, hex::encode(&tx_data));
+            let tx_hash = pool.send_tx(tx_data).await;
+            match tx_hash {
+                Ok(tx_hash) => {
+                    tracing::info!("[Job: {}] Received tx hash: {:#x}", job.id, tx_hash);
+                    // TODO: send job with tx_hash to next channel
+                },
+                Err(_) => {
+                    // TODO: what should we do in that case?
+                }
+            }
         }
     });
 

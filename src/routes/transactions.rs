@@ -79,7 +79,7 @@ pub async fn query() -> Result<HttpResponse, ServiceError> {
     Ok(HttpResponse::Ok().finish())
 }
 
-pub async fn transact<D: KeyValueDB>(
+pub async fn send_transactions<D: KeyValueDB>(
     request: web::Json<Vec<TransactionRequest>>,
     state: Data<State<D>>, // sender: web::Data<Sender<Data<Job>>>,
                            // vk: web::Data<VK<Bn256>>,
@@ -87,8 +87,29 @@ pub async fn transact<D: KeyValueDB>(
                            // application_settings: web::Data<ApplicationSettings>,
 ) -> Result<HttpResponse, ServiceError> {
     let mut transaction_requests: Vec<TransactionRequest> = request.0.into();
+    // TODO: support multitransfer
     let transaction_request = transaction_requests.pop().unwrap();
+    transact(transaction_request, state).await
+}
 
+pub async fn send_transaction<D: KeyValueDB>(
+    request: web::Json<TransactionRequest>,
+    state: Data<State<D>>, // sender: web::Data<Sender<Data<Job>>>,
+                           // vk: web::Data<VK<Bn256>>,
+                           // web3_settings: web::Data<Web3Settings>,
+                           // application_settings: web::Data<ApplicationSettings>,
+) -> Result<HttpResponse, ServiceError> {
+    let transaction_request: TransactionRequest = request.0.into();
+    transact(transaction_request, state).await
+}
+
+pub async fn transact<D: KeyValueDB>(
+    transaction_request: TransactionRequest,
+    state: Data<State<D>>, // sender: web::Data<Sender<Data<Job>>>,
+                           // vk: web::Data<VK<Bn256>>,
+                           // web3_settings: web::Data<Web3Settings>,
+                           // application_settings: web::Data<ApplicationSettings>,
+) -> Result<HttpResponse, ServiceError> {
     let request_id = transaction_request
         .uuid
         .as_ref()

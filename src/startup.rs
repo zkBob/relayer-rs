@@ -1,7 +1,7 @@
 use crate::{
     configuration::Settings,
     contracts::Pool,
-    routes::transactions::{query, transact},
+    routes::transactions::{query, send_transactions, send_transaction},
     state::{Job, State, DB}
 };
 
@@ -93,7 +93,8 @@ pub fn run<D: 'static + KeyValueDB>(
             .wrap(cors)
             .wrap(middleware::Logger::default())
             .route("/tx", web::get().to(query))
-            .route("/sendTransactions", web::post().to(transact::<D>))
+            .route("/sendTransaction", web::post().to(send_transaction::<D>))
+            .route("/sendTransactions", web::post().to(send_transactions::<D>))
             .app_data(state.clone())
     })
     .listen(listener)?

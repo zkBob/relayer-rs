@@ -16,7 +16,7 @@ use libzeropool::{
 };
 use libzkbob_rs::{merkle::MerkleTree, proof};
 
-use crate::{helpers::HexRepr, state::Job};
+use crate::{helpers::BytesRepr, state::Job};
 
 const TRANSFER_INDEX_SIZE: usize = 6;
 const ENERGY_SIZE: usize = 14;
@@ -26,7 +26,7 @@ pub fn build<D: 'static + KeyValueDB>(
     job: &Data<Job>,
     tree: &MerkleTree<D, PoolBN256>,
     params: &Parameters<Bn256>,
-) -> String {
+) -> Vec<u8> {
     let tx_request = &job.transaction_request.as_ref().unwrap();
     let tree_proof = prove_tree(&job, tree, params);
 
@@ -39,32 +39,31 @@ pub fn build<D: 'static + KeyValueDB>(
     let transfer_index: u64 = delta_params.2.try_into().unwrap();
 
     let root_after = tree_proof.0[1];
-    let tx_type = tx_request.tx_type.clone();
-    let memo = tx_request.memo.clone();
-    let memo_size = (memo.len() as u64 / 2).to_hex_padded(2);
+    let tx_type = hex::decode(&tx_request.tx_type).unwrap();
+    let memo = hex::decode(&tx_request.memo).unwrap();
+    let memo_size = (memo.len() as u64).bytes_padded(2);
 
     let mut tx_data = vec![
-        nullifier.to_hex(),
-        out_commit.to_hex(),
-        transfer_index.to_hex_padded(TRANSFER_INDEX_SIZE),
-        energy_amount.to_hex_padded(ENERGY_SIZE),
-        token_amount.to_hex_padded(TOKEN_SIZE),
-        tx_request.proof.proof.to_hex(),
-        root_after.to_hex(),
-        tree_proof.1.to_hex(),
+        nullifier.bytes(),
+        out_commit.bytes(),
+        transfer_index.bytes_padded(TRANSFER_INDEX_SIZE),
+        energy_amount.bytes_padded(ENERGY_SIZE),
+        token_amount.bytes_padded(TOKEN_SIZE),
+        tx_request.proof.proof.bytes(),
+        root_after.bytes(),
+        tree_proof.1.bytes(),
         tx_type,
         memo_size,
         memo,
     ];
 
-    let deposit_signature = tx_request.deposit_signature.clone();
-    if !deposit_signature.is_empty() {
-        tx_data.push(deposit_signature.replace("0x", ""))
+    if !tx_request.deposit_signature.is_empty() {
+        let deposit_signature =
+            hex::decode(tx_request.deposit_signature.replace("0x", "")).unwrap();
+        tx_data.push(deposit_signature)
     }
 
-    let tx_data = tx_data.join("");
-    tracing::debug!("[Job: {}] TX DATA: {}", job.id, tx_data);
-    tx_data
+    tx_data.concat()
 }
 
 fn prove_tree<D: 'static + KeyValueDB>(
