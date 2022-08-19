@@ -1,4 +1,3 @@
-use actix_web::web::Data;
 use kvdb::KeyValueDB;
 use libzeropool::{
     constants::{HEIGHT, OUTPLUSONELOG},
@@ -23,7 +22,7 @@ const ENERGY_SIZE: usize = 14;
 const TOKEN_SIZE: usize = 8;
 
 pub fn build<D: 'static + KeyValueDB>(
-    job: &Data<Job>,
+    job: &Job,
     tree: &MerkleTree<D, PoolBN256>,
     params: &Parameters<Bn256>,
 ) -> Vec<u8> {
@@ -67,7 +66,7 @@ pub fn build<D: 'static + KeyValueDB>(
 }
 
 fn prove_tree<D: 'static + KeyValueDB>(
-    job: &Data<Job>,
+    job: &Job,
     tree: &MerkleTree<D, PoolBN256>,
     params: &Parameters<Bn256>,
 ) -> (Vec<Num<Fr>>, Proof<Bn256>) {

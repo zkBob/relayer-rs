@@ -210,7 +210,7 @@ pub async fn transact<D: KeyValueDB>(
             },
         ],
     })?;
-    state.sender.send(Data::new(job)).await.unwrap();
+    state.sender.send(job).await.unwrap();
 
     let body = serde_json::to_string(&Response {
         job_id: request_id.as_hyphenated().to_string(),

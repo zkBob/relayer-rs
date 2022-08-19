@@ -29,7 +29,7 @@ pub struct Application<D: 'static + KeyValueDB> {
 impl<D: 'static + KeyValueDB> Application<D> {
     pub async fn build(
         configuration: Settings,
-        sender: Sender<Data<Job>>,
+        sender: Sender<Job>,
         pending: DB<D>,
         finalized: DB<D>,
         jobs: Data<D>, //We don't realy need a mutex, since all jobs/tx are processed independently

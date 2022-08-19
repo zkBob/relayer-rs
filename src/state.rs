@@ -90,7 +90,7 @@ pub struct State<D: 'static + KeyValueDB> {
     pub finalized: DB<D>,
     pub vk: VK<Bn256>,
     pub pool: Pool,
-    pub sender: Data<Sender<Data<Job>>>, // rx: Receiver<Transaction>,
+    pub sender: Data<Sender<Job>>,
 }
 
 impl<D: 'static + KeyValueDB> State<D> {

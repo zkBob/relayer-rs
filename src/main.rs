@@ -1,7 +1,12 @@
+use std::sync::Mutex;
+
 use relayer_rs::{
     configuration::get_config,
+    contracts::Pool,
     startup::Application,
-    telemetry::{get_subscriber, init_subscriber}, state::Job, tx, contracts::Pool,
+    state::Job,
+    telemetry::{get_subscriber, init_subscriber},
+    tx_checker, tx_sender,
 };
 
 use libzeropool::POOL_PARAMS;
@@ -9,7 +14,6 @@ use libzkbob_rs::merkle::MerkleTree;
 use tokio::sync::mpsc;
 
 use actix_web::web::Data;
-use std::sync::Mutex;
 
 use kvdb_rocksdb::{Database, DatabaseConfig};
 
@@ -23,7 +27,7 @@ async fn main() -> Result<(), std::io::Error> {
 
     let configuration = get_config().expect("failed to get configuration");
 
-    let (sender, mut rx) = mpsc::channel::<Data<Job>>(1000);
+    let (sender, receiver) = mpsc::channel::<Job>(1000);
 
     let pending =
         MerkleTree::new_native(Default::default(), "pending.db", POOL_PARAMS.clone()).unwrap();
@@ -33,7 +37,7 @@ async fn main() -> Result<(), std::io::Error> {
 
     let jobs = Data::new(Database::open(
         &DatabaseConfig {
-            columns: 2,
+            columns: 3,
             ..Default::default()
         },
         "jobs.db",
@@ -41,50 +45,25 @@ async fn main() -> Result<(), std::io::Error> {
 
     let pending = Data::new(Mutex::new(pending));
     let finalized = Data::new(Mutex::new(finalized));
-    
+
     let tree_params = configuration.application.get_tree_params();
-    let pool = Pool::new(Data::new(configuration.web3.clone())).expect("failed to instantiate pool contract");
+    let pool = Pool::new(Data::new(configuration.web3.clone()))
+        .expect("failed to instantiate pool contract");
 
     let app = Application::build(
         configuration,
         sender.clone(),
         pending.clone(),
         finalized.clone(),
-        jobs,
+        jobs.clone(),
         None,
     )
     .await?;
 
     app.state.sync().await.expect("failed to sync");
 
-    
-    tokio::spawn(async move {
-        tracing::info!("starting receiver");
-        
-        while let Some(job) = rx.recv().await {
-            let tx_data = {
-                let mut p = pending.lock().unwrap();
-                let tx_data = tx::build(&job, &p, &tree_params);
-                
-                let transaction_request = job.transaction_request.as_ref().unwrap();
-                p.append_hash(transaction_request.proof.inputs[2], false);
-                
-                tx_data
-            };
-
-            tracing::info!("[Job: {}] Sending tx with data: {}", job.id, hex::encode(&tx_data));
-            let tx_hash = pool.send_tx(tx_data).await;
-            match tx_hash {
-                Ok(tx_hash) => {
-                    tracing::info!("[Job: {}] Received tx hash: {:#x}", job.id, tx_hash);
-                    // TODO: send job with tx_hash to next channel
-                },
-                Err(_) => {
-                    // TODO: what should we do in that case?
-                }
-            }
-        }
-    });
+    tx_sender::start(&app.state, receiver, tree_params, pool);
+    tx_checker::start(&app.state);
 
     app.run_untill_stopped().await
 }
