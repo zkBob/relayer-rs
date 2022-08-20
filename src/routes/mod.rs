@@ -13,7 +13,7 @@ use kvdb::KeyValueDB;
 use crate::{
     routes::{
         info::info,
-        transactions::{query, send_transaction, send_transactions}, fee::fee,
+        transactions::{query, send_transaction, send_transactions}, fee::fee, job::job,
     },
     state::State,
 };
@@ -21,6 +21,7 @@ use crate::{
 pub mod info;
 pub mod fee;
 pub mod transactions;
+pub mod job;
 
 pub fn run<D: 'static + KeyValueDB>(
     listener: TcpListener,
@@ -41,6 +42,7 @@ pub fn run<D: 'static + KeyValueDB>(
             .route("/tx", web::get().to(query))
             .route("/info", web::get().to(info::<D>))
             .route("/fee", web::get().to(fee::<D>))
+            .route("/job/{job_id}", web::get().to(job::<D>))
             .route("/sendTransaction", web::post().to(send_transaction::<D>))
             .route("/sendTransactions", web::post().to(send_transactions::<D>))
             .app_data(state.clone())
