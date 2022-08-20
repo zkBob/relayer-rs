@@ -36,6 +36,7 @@ pub struct TransactionRequest {
 
 #[derive(Serialize)]
 pub struct Response {
+    #[serde(rename = "jobId")]
     job_id: String,
 }
 
