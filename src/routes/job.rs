@@ -20,7 +20,7 @@ pub async fn job<D: KeyValueDB>(
     struct JobResponse {
         state: String,
         #[serde(rename = "txHash")]
-        tx_hash: Vec<String>,
+        tx_hash: Option<Vec<String>>,
         #[serde(rename = "failedReason")]
         failed_reason: Option<String>,
         #[serde(rename = "createdOn")]
@@ -51,11 +51,15 @@ pub async fn job<D: KeyValueDB>(
 
     let mut response = JobResponse {
         state: String::from(state),
-        tx_hash: vec![format!("{:#x}", job.transaction.unwrap().hash)],
+        tx_hash: None,
         failed_reason: None,
         created_on: job.created.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis(),
         finished_on: 0, // TODO: Add finished in job //job.finished.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
     };
+
+    if job.transaction.is_some() {
+        response.tx_hash = Some(vec![format!("{:#x}", job.transaction.unwrap().hash)]);
+    }
 
     if job.status == JobStatus::Rejected {
         response.failed_reason = Some(String::new()); // TODO: save fail reason

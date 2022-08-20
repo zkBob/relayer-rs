@@ -177,7 +177,7 @@ pub async fn transact<D: KeyValueDB>(
             */
             Insert {
                 col: JobsDbColumn::Jobs as u32,
-                key: DBKey::from_vec(request_id.as_bytes().to_vec()),
+                key: DBKey::from_slice(request_id.as_hyphenated().to_string().as_bytes()),
                 value: serde_json::to_string(&job).unwrap().as_bytes().to_vec(),
             },
             /*
