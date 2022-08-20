@@ -1,9 +1,8 @@
 use std::time::SystemTime;
 
-use actix_http::StatusCode;
 use actix_web::{
     web::{self, Data},
-    HttpResponse, ResponseError,
+    HttpResponse,
 };
 use kvdb::{DBKey, DBTransaction, KeyValueDB};
 use serde::{Deserialize, Serialize};
@@ -15,21 +14,15 @@ use libzeropool::fawkes_crypto::{
     ff_uint::Num,
 };
 
-use crate::{state::{Job, JobStatus, JobsDbColumn, State}, helpers::serialize};
+use crate::{
+    helpers::serialize,
+    state::{Job, JobStatus, JobsDbColumn, State},
+};
 use memo_parser::{self, memo::Memo, memo::TxType};
 use uuid::Uuid;
-extern crate hex;
-#[derive(Debug)]
-pub enum ServiceError {
-    BadRequest(String),
-    InternalError,
-}
 
-impl From<std::io::Error> for ServiceError {
-    fn from(_: std::io::Error) -> Self {
-        ServiceError::InternalError
-    }
-}
+use super::ServiceError;
+extern crate hex;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,19 +55,6 @@ pub struct Proof {
     pub proof: prover::Proof<Bn256>,
 }
 
-impl std::fmt::Display for ServiceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "request failed")
-    }
-}
-impl ResponseError for ServiceError {
-    fn status_code(&self) -> actix_http::StatusCode {
-        match self {
-            ServiceError::BadRequest(_) => StatusCode::BAD_REQUEST,
-            ServiceError::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
-        }
-    }
-}
 pub async fn query() -> Result<HttpResponse, ServiceError> {
     Ok(HttpResponse::Ok().finish())
 }

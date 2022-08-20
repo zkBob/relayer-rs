@@ -1,17 +1,11 @@
 use crate::{
     configuration::Settings,
     contracts::Pool,
-    routes::transactions::{query, send_transactions, send_transaction},
-    state::{Job, State, DB}
+    routes,
+    state::{Job, State, DB},
 };
 
-use actix_cors::Cors;
-use actix_web::{
-    dev::Server,
-    middleware,
-    web::{self, Data},
-    App, HttpServer, http::header
-};
+use actix_web::{dev::Server, web::Data};
 use kvdb::KeyValueDB;
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier::VK};
@@ -56,7 +50,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
             web3,
         });
 
-        let server = run(listener, state.clone())?;
+        let server = routes::run(listener, state.clone())?;
 
         Ok(Self {
             server,
@@ -74,30 +68,4 @@ impl<D: 'static + KeyValueDB> Application<D> {
         tracing::info!("starting webserver at http://{}:{}", self.host, self.port);
         self.server.await
     }
-}
-
-pub fn run<D: 'static + KeyValueDB>(
-    listener: TcpListener,
-    state: Data<State<D>>,
-) -> Result<Server, std::io::Error> {
-    tracing::info!("starting webserver");
-
-    let server = HttpServer::new(move || {
-        let cors = Cors::default()
-            .allow_any_origin()
-            .allowed_methods(vec!["GET", "POST"])
-            .allowed_header(header::CONTENT_TYPE)
-            .max_age(3600);
-
-        App::new()
-            .wrap(cors)
-            .wrap(middleware::Logger::default())
-            .route("/tx", web::get().to(query))
-            .route("/sendTransaction", web::post().to(send_transaction::<D>))
-            .route("/sendTransactions", web::post().to(send_transactions::<D>))
-            .app_data(state.clone())
-    })
-    .listen(listener)?
-    .run();
-    Ok(server)
 }
