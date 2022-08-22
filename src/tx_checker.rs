@@ -3,7 +3,6 @@ use tokio::task;
 use std::time::Duration;
 
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
-use libzeropool::constants::OUTPLUSONELOG;
 
 use crate::helpers::serialize;
 use crate::state::{Job, JobStatus, JobsDbColumn, State};
@@ -57,15 +56,10 @@ pub async fn check_tx<D: KeyValueDB>(
                 tx_receipt.block_number.unwrap()
             );
 
-            let mut finalized = state.finalized.lock().unwrap();
-            {
-                finalized.add_hash_at_height(
-                    OUTPLUSONELOG as u32,
-                    job.index,
-                    job.commitment,
-                    false,
-                );
-            }
+            state.finalized
+                .lock()
+                .unwrap()
+                .add_leafs_and_commitments(vec![], vec![(job.index, job.commitment)]);
 
             job.status = JobStatus::Done;
 

@@ -25,8 +25,8 @@ pub fn start<D: KeyValueDB>(
                 let mut pending = state.pending.lock().unwrap();
                 let tx_data = tx::build(&job, &pending, &tree_params);
 
-                let transaction_request = job.transaction_request.as_ref().unwrap();
-                pending.append_hash(transaction_request.proof.inputs[2], false);
+                job.index = pending.next_index();
+                pending.add_leafs_and_commitments(vec![], vec![(job.index, job.commitment)]);
 
                 tx_data
             };
@@ -55,6 +55,11 @@ pub fn start<D: KeyValueDB>(
                                 JobsDbColumn::Jobs as u32,
                                 job.id.as_bytes(),
                                 &serde_json::to_vec(&job).unwrap(),
+                            );
+                            tx.put(
+                                JobsDbColumn::JobsIndex as u32,
+                                &job.index.to_be_bytes(),
+                                job.id.as_bytes(),
                             );
                             tx.put(
                                 JobsDbColumn::TxCheckTasks as u32,

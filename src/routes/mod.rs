@@ -1,56 +1,20 @@
-use std::net::TcpListener;
+use actix_http::StatusCode;
+use actix_web::ResponseError;
 
-use actix_cors::Cors;
-use actix_http::{header, StatusCode};
-use actix_web::{
-    dev::Server,
-    middleware,
-    web::{self, Data},
-    App, HttpServer, ResponseError,
-};
-use kvdb::KeyValueDB;
-
-use crate::{
-    routes::{
-        info::info,
-        transactions::{query, send_transaction, send_transactions}, fee::fee, job::job,
-    },
-    state::State,
+use crate::routes::{
+    fee::fee,
+    info::info,
+    job::job,
+    send_transactions::{query, send_transaction, send_transactions},
+    transactions::transactions,
 };
 
-pub mod info;
-pub mod fee;
-pub mod transactions;
-pub mod job;
-
-pub fn run<D: 'static + KeyValueDB>(
-    listener: TcpListener,
-    state: Data<State<D>>,
-) -> Result<Server, std::io::Error> {
-    tracing::info!("starting webserver");
-
-    let server = HttpServer::new(move || {
-        let cors = Cors::default()
-            .allow_any_origin()
-            .allowed_methods(vec!["GET", "POST"])
-            .allowed_header(header::CONTENT_TYPE)
-            .max_age(3600);
-
-        App::new()
-            .wrap(cors)
-            .wrap(middleware::Logger::default())
-            .route("/tx", web::get().to(query))
-            .route("/info", web::get().to(info::<D>))
-            .route("/fee", web::get().to(fee::<D>))
-            .route("/job/{job_id}", web::get().to(job::<D>))
-            .route("/sendTransaction", web::post().to(send_transaction::<D>))
-            .route("/sendTransactions", web::post().to(send_transactions::<D>))
-            .app_data(state.clone())
-    })
-    .listen(listener)?
-    .run();
-    Ok(server)
-}
+mod fee;
+mod info;
+mod job;
+pub mod routes;
+pub mod send_transactions;
+mod transactions;
 
 #[derive(Debug)]
 pub enum ServiceError {

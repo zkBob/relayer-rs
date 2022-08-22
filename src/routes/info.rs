@@ -8,13 +8,11 @@ use super::ServiceError;
 
 pub async fn info<D: KeyValueDB>(state: Data<State<D>>) -> Result<HttpResponse, ServiceError> {
     #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
     struct InfoResponse {
         root: String,
-        #[serde(rename = "optimisticRoot")]
         optimistic_root: String,
-        #[serde(rename = "deltaIndex")]
         delta_index: u64,
-        #[serde(rename = "optimisticDeltaIndex")]
         optimistic_delta_index: u64,
     }
 

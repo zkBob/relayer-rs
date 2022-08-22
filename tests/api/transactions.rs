@@ -3,7 +3,7 @@ use crate::helpers::spawn_app;
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
 use libzeropool::constants::OUT;
 use relayer_rs::{
-    routes::transactions::TransactionRequest,
+    routes::send_transactions::TransactionRequest,
     state::{Job, JobStatus, JobsDbColumn},
     tx_checker::check_tx,
 };
@@ -75,7 +75,7 @@ async fn gen_tx_and_send() {
     assert!(test_app
         .state
         .jobs
-        .has_key(0, request_id.as_bytes())
+        .has_key(0, request_id.as_hyphenated().to_string().as_bytes())
         .unwrap());
 
     let pending = test_app.state.pending.lock().unwrap();

@@ -56,9 +56,9 @@ pub fn build<D: 'static + KeyValueDB>(
         memo,
     ];
 
-    if !tx_request.deposit_signature.is_empty() {
+    if let Some(deposit_signature) = &tx_request.deposit_signature {
         let deposit_signature =
-            hex::decode(tx_request.deposit_signature.replace("0x", "")).unwrap();
+            hex::decode(deposit_signature.replace("0x", "")).unwrap();
         tx_data.push(deposit_signature)
     }
 

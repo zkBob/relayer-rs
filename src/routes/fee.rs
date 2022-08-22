@@ -8,11 +8,11 @@ use super::ServiceError;
 
 pub async fn fee<D: KeyValueDB>(state: Data<State<D>>) -> Result<HttpResponse, ServiceError> {
     #[derive(Serialize)]
-    struct FeeResponse{
-        fee: String
+    struct FeeResponse {
+        fee: String,
     }
-    
+
     Ok(HttpResponse::Ok().json(FeeResponse {
-        fee: state.web3.relayer_fee.to_string()
+        fee: state.web3.relayer_fee.to_string(),
     }))
 }

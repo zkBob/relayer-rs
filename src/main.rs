@@ -37,7 +37,7 @@ async fn main() -> Result<(), std::io::Error> {
 
     let jobs = Data::new(Database::open(
         &DatabaseConfig {
-            columns: 3,
+            columns: 4,
             ..Default::default()
         },
         "jobs.db",

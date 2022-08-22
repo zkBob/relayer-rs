@@ -1,7 +1,7 @@
 use crate::{
     configuration::Settings,
     contracts::Pool,
-    routes,
+    routes::routes,
     state::{Job, State, DB},
 };
 

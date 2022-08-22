@@ -23,8 +23,8 @@ use uuid::Uuid;
 use web3::types::{BlockNumber, Transaction as Web3Transaction};
 
 use crate::{
-    configuration::Web3Settings, contracts::Pool, routes::transactions::TransactionRequest,
-    tx_checker::check_tx,
+    configuration::Web3Settings, contracts::Pool, routes::send_transactions::TransactionRequest,
+    tx_checker::check_tx, helpers,
 };
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -59,8 +59,9 @@ pub enum JobStatus {
 
 pub enum JobsDbColumn {
     Jobs = 0,
-    Nullifiers = 1,
-    TxCheckTasks = 2, // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective, 
+    JobsIndex = 1,
+    Nullifiers = 2,
+    TxCheckTasks = 3 // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective, 
                      //so we copy only those keys that require transaction receipt check
 }
 
@@ -75,6 +76,7 @@ pub struct Job {
     pub commitment: Num<Fr>,
     pub root: Option<Num<Fr>>,
     pub nullifier: Num<Fr>,
+    pub memo: Vec<u8> // TODO: duplicates transaction_request.memo
 }
 
 impl Job {
@@ -130,7 +132,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                         if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
                             let calldata = memoparser::parse_calldata(&tx.input.0, None)
                                 .expect("Calldata is invalid!");
-
+                            
                             let commitment = Num::from_uint_reduced(NumRepr(
                                 Uint::from_big_endian(&calldata.out_commit),
                             ));
@@ -154,6 +156,9 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 Uint::from_big_endian(&calldata.nullifier),
                             ));
 
+                            // TODO: fix this
+                            let memo = Vec::from(&tx.input.0[644..(644 + calldata.memo_size) as usize]);
+
                             let job_id = Uuid::new_v4();
 
                             let job = Job {
@@ -166,18 +171,25 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 commitment,
                                 nullifier,
                                 root: None,
+                                memo: helpers::truncate_memo_prefix(calldata.tx_type, memo)
                             };
 
                             tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash));
                             let db_transaction = DBTransaction {
-                                ops: vec![Insert {
-                                    col: JobsDbColumn::Jobs as u32,
-                                    key: DBKey::from_vec(
-                                        job_id.as_hyphenated().to_string().as_bytes().to_vec(),
-                                    ),
-
-                                    value: serde_json::to_vec(&job).unwrap(),
-                                }],
+                                ops: vec![
+                                    Insert {
+                                        col: JobsDbColumn::Jobs as u32,
+                                        key: DBKey::from_vec(
+                                            job_id.as_hyphenated().to_string().as_bytes().to_vec(),
+                                        ),
+                                        value: serde_json::to_vec(&job).unwrap(),
+                                    },
+                                    Insert { 
+                                        col: JobsDbColumn::JobsIndex as u32,
+                                        key: DBKey::from_slice(&job.index.to_be_bytes()),
+                                        value: job_id.as_hyphenated().to_string().as_bytes().to_vec(),
+                                    }
+                                ],
                             };
                             self.jobs.write(db_transaction)?;
                         }

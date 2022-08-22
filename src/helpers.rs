@@ -1,6 +1,7 @@
 use borsh::BorshSerialize;
 use libzeropool::fawkes_crypto::{ff_uint::Num, engines::bn256::Fr};
 use libzeropool::fawkes_crypto::{engines::bn256::Fq, backend::bellman_groth16::{prover::Proof, engines::Bn256}};
+use memo_parser::memo::TxType;
 use num_bigint::{BigInt, ToBigInt};
 
 
@@ -62,6 +63,15 @@ impl BytesRepr for Proof<Bn256> {
 
     fn bytes_padded(&self, _: usize) -> Vec<u8> {
         unimplemented!();
+    }
+}
+
+pub fn truncate_memo_prefix(tx_type: u32, memo: Vec<u8>) -> Vec<u8> {
+    match TxType::from_u32(tx_type) {
+        TxType::Deposit => memo[8..].to_vec(),
+        TxType::Transfer => memo[8..].to_vec(),
+        TxType::Withdrawal => memo[36..].to_vec(),
+        TxType::DepositPermittable => memo[36..].to_vec()
     }
 }
 
