@@ -20,7 +20,8 @@ async fn test_sync() {
     3. check tx list
 
     */
-
+    use anvil;
+    use ethers;
 }
 
 #[tokio::test]
