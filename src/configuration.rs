@@ -30,7 +30,8 @@ pub struct Web3Settings {
     pub relayer_fee: u64,
     pub gas_limit: u64,
     #[serde(skip_serializing)]
-    pub credentials: Credentials
+    pub credentials: Credentials,
+    pub scheduler_interval_sec: u64
 }
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier, Parameters};
@@ -91,7 +92,8 @@ pub enum Environment {
     Local,
     Production,
     Kovan,
-    Mock
+    Mock,
+    Anvil
 }
 
 impl Environment {
@@ -101,6 +103,7 @@ impl Environment {
             Environment::Kovan => "kovan.yaml",
             Environment::Production => "production.yaml",
             Environment::Mock => "mock.yaml",
+            Environment::Anvil => "anvil.yaml",
 
         }
     }
@@ -115,6 +118,7 @@ impl TryFrom<String> for Environment {
             "production" => Ok(Self::Production),
             "kovan" => Ok(Self::Kovan),
             "mock" => Ok(Self::Mock),
+            "anvil" => Ok(Self::Anvil),
             _other => Err(format!("failed to parse {}", s)),
         }
     }

@@ -1,7 +1,7 @@
-use libzeropool::fawkes_crypto::ff_uint::Num;
 use crate::helpers::spawn_app;
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
 use libzeropool::constants::OUT;
+use libzeropool::fawkes_crypto::ff_uint::Num;
 use relayer_rs::{
     routes::send_transactions::TransactionRequest,
     state::{Job, JobStatus, JobsDbColumn},
@@ -52,42 +52,47 @@ async fn post_transaction_works() {
 
 #[actix_rt::test]
 async fn gen_tx_and_send() {
-    let test_app = spawn_app(true).await.unwrap();
+    let mut test_app = spawn_app(true).await.unwrap();
 
-    let generator = test_app.generator.unwrap();
+    let generator = test_app.generator.as_ref();
 
-    let request_id = uuid::Uuid::new_v4();
+    if let Some(generator) = generator {
+        let request_id = uuid::Uuid::new_v4();
+        let tx = generator.generate_deposit(Some(request_id)).await.unwrap();
 
-    let tx = generator.generate_deposit(Some(request_id)).await.unwrap();
+        let client = reqwest::Client::new();
 
-    let client = reqwest::Client::new();
+        let response = client
+            .post(format!("{}/sendTransaction", test_app.address))
+            .body(serde_json::to_string(&tx).unwrap())
+            .header("Content-type", "application/json")
+            .send()
+            .await
+            .expect("failed to make request");
 
-    let response = client
-        .post(format!("{}/sendTransaction", test_app.address))
-        .body(serde_json::to_string(&tx).unwrap())
-        .header("Content-type", "application/json")
-        .send()
-        .await
-        .expect("failed to make request");
+        let state = test_app.state.clone();
+        test_app.process_job().await;
 
-    assert_eq!(response.status().as_u16(), 200 as u16);
+        assert_eq!(response.status().as_u16(), 200 as u16);
 
-    assert!(test_app
-        .state
-        .jobs
-        .has_key(0, request_id.as_hyphenated().to_string().as_bytes())
-        .unwrap());
+        assert!(state
+            .jobs
+            .has_key(0, request_id.as_hyphenated().to_string().as_bytes())
+            .unwrap());
 
-    let pending = test_app.state.pending.lock().unwrap();
-    {
-        let next_index = pending.next_index();
-        assert_eq!(next_index, OUT as u64 + 1);
+        let pending = state.pending.lock().unwrap();
+        {
+            let next_index = pending.next_index();
+            assert_eq!(next_index, OUT as u64 + 1);
+        }
+
+        let finalized = state.finalized.lock().unwrap();
+        {
+            assert_eq!(finalized.next_index(), 0 as u64);
+        }
     }
 
-    let finalized = test_app.state.finalized.lock().unwrap();
-    {
-        assert_eq!(finalized.next_index(), 0 as u64);
-    }
+    // ;
 }
 
 #[actix_rt::test]
@@ -113,7 +118,12 @@ async fn test_check_pending_state_after_tx() {
     {
         let pending_state = test_app.state.pending.lock().unwrap();
         let root = pending_state.get_root();
-        assert_eq!(root, Num::from("11469701942666298368112882412133877458305516134926649826543144744382391691533"));
+        assert_eq!(
+            root,
+            Num::from(
+                "11469701942666298368112882412133877458305516134926649826543144744382391691533"
+            )
+        );
     }
     use std::fs;
     let file = fs::File::open("tests/data/transaction.json").unwrap();
@@ -129,7 +139,12 @@ async fn test_check_pending_state_after_tx() {
     {
         let pending_state = test_app.state.pending.lock().unwrap();
         let root = pending_state.get_root();
-        assert_eq!(root, Num::from("16008527574580846904606969406329027992616751511283117704657085855575006190079"));
+        assert_eq!(
+            root,
+            Num::from(
+                "16008527574580846904606969406329027992616751511283117704657085855575006190079"
+            )
+        );
     }
 }
 
@@ -139,7 +154,12 @@ async fn test_check_pending_state_after_two_tx() {
     {
         let pending_state = test_app.state.pending.lock().unwrap();
         let root = pending_state.get_root();
-        assert_eq!(root, Num::from("11469701942666298368112882412133877458305516134926649826543144744382391691533"));
+        assert_eq!(
+            root,
+            Num::from(
+                "11469701942666298368112882412133877458305516134926649826543144744382391691533"
+            )
+        );
     }
     use std::fs;
     let file = fs::File::open("tests/data/transaction.json").unwrap();
@@ -155,7 +175,12 @@ async fn test_check_pending_state_after_two_tx() {
     {
         let pending_state = test_app.state.pending.lock().unwrap();
         let root = pending_state.get_root();
-        assert_eq!(root, Num::from("16008527574580846904606969406329027992616751511283117704657085855575006190079"));
+        assert_eq!(
+            root,
+            Num::from(
+                "16008527574580846904606969406329027992616751511283117704657085855575006190079"
+            )
+        );
     }
     client
         .post(format!("{}/transact", test_app.address))
@@ -167,7 +192,12 @@ async fn test_check_pending_state_after_two_tx() {
     {
         let pending_state = test_app.state.pending.lock().unwrap();
         let root = pending_state.get_root();
-        assert_eq!(root, Num::from("18654607918309982490299585095288248711247171096327425318142876620343469986659"));
+        assert_eq!(
+            root,
+            Num::from(
+                "18654607918309982490299585095288248711247171096327425318142876620343469986659"
+            )
+        );
     }
 }
 
@@ -223,7 +253,6 @@ async fn test_finalize() {
     let pending = state.pending.lock().unwrap();
     assert_eq!(finalized.next_index(), pending.next_index());
 }
-
 
 #[actix_rt::test]
 async fn test_rollback() {
@@ -339,9 +368,8 @@ async fn test_rollback() {
         finalized.rollback(0 as u64);
     }
 
-    // Mutate received jobs to simulate processing, bot jobs get mining state and a corresponding key among scheduled checks (TxCheckTasks) 
+    // Mutate received jobs to simulate processing, bot jobs get mining state and a corresponding key among scheduled checks (TxCheckTasks)
     for (id, job_as_bytes) in app.state.jobs.iter(JobsDbColumn::Jobs as u32) {
-
         let mut job: Job = serde_json::from_slice(&job_as_bytes).unwrap();
 
         job.status = JobStatus::Mining;
@@ -385,7 +413,11 @@ async fn test_rollback() {
     {
         let finalized = app.state.finalized.lock().unwrap();
 
-        assert_eq!(finalized.next_index(), 0 as u64, "finalized db must be at vanilla state");
+        assert_eq!(
+            finalized.next_index(),
+            0 as u64,
+            "finalized db must be at vanilla state"
+        );
     }
 
     assert!(
@@ -398,7 +430,6 @@ async fn test_rollback() {
             }),
         "all job must have been set to Mining status "
     );
-
 
     match check_tx(last_job, state).await {
         Ok(status) => tracing::info!("check_tx result: {:#?}", status),
