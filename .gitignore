@@ -5,3 +5,4 @@ tx.db
 tests/js_test/node_modules
 *.db
 tests/data/params/*
+data/params

@@ -7,7 +7,7 @@ use libzeropool::{
     },
     native::boundednum::BoundedNum,
 };
-use relayer_rs::routes::transactions::{TransactionRequest, Proof};
+use relayer_rs::routes::send_transactions::{TransactionRequest, Proof};
 
 
 use libzeropool::POOL_PARAMS;
@@ -143,7 +143,7 @@ impl Generator {
             proof: Proof { inputs, proof },
             memo: hex::encode(tx_data.memo),
             tx_type: String::from("0000"),
-            deposit_signature: packed_sig,
+            deposit_signature: Some(packed_sig),
         })
     }
 }

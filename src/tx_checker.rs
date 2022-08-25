@@ -1,38 +1,39 @@
 use actix_web::web::Data;
-use std::thread::sleep;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use tokio::task;
 
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
-use libzeropool::constants::OUTPLUSONELOG;
 
 use crate::helpers::serialize;
 use crate::state::{Job, JobStatus, JobsDbColumn, State};
 
-pub fn start_poller<D: KeyValueDB>(state: &Data<State<D>>) -> () {
+pub fn start<D: KeyValueDB>(state: &Data<State<D>>) -> () {
     let state = state.clone();
+    task::spawn(async move {
+        tracing::info!("starting tx_checker...");
+        loop {
+            let jobs: Vec<Job> = state
+                .jobs
+                .iter(JobsDbColumn::TxCheckTasks as u32)
+                .map(|(_k, v)| serde_json::from_slice(&v[..]).unwrap())
+                .collect();
 
-    let jobs: Vec<Job> = state
-        .jobs
-        .iter(JobsDbColumn::TxCheckTasks as u32)
-        .map(|(_k, v)| serde_json::from_slice(&v[..]).unwrap())
-        .collect();
-    tokio::spawn(async move {
-        // let pool = Data::new(state.pool);
-        for job in jobs.into_iter() {
-            let state = state.clone();
-
-            tracing::debug!("polling started at {:?}", SystemTime::now());
-            match check_tx(job, state).await {
-                Err(_) | Ok(JobStatus::Rejected) => {
-                    tracing::warn!(
-                        "caught error / revert " // TODO: add job id
-                    );
-                    break;
+            for job in jobs.into_iter() {
+                let state = state.clone();
+                let job_id:&str = &job.id.clone();
+                match check_tx(job, state).await {
+                    Err(_) | Ok(JobStatus::Rejected) => {
+                        tracing::warn!(
+                            "job {} caught error / revert ",
+                            job_id
+                        );
+                        break;
+                    }
+                    _ => (),
                 }
-                _ => (),
             }
+            tokio::time::sleep(Duration::from_secs(state.web3.scheduler_interval_sec)).await;
         }
-        sleep(Duration::from_secs(5));
     });
 }
 
@@ -42,7 +43,7 @@ pub async fn check_tx<D: KeyValueDB>(
 ) -> Result<JobStatus, std::io::Error> {
     let jobs = &state.jobs;
     let tx_hash = job.transaction.as_ref().unwrap().hash;
-    tracing::info!("check for tx {} started", tx_hash);
+    tracing::info!("check for tx {:#x} started", tx_hash);
     if let Some(tx_receipt) = state
         .pool
         .get_transaction_receipt(tx_hash)
@@ -51,30 +52,38 @@ pub async fn check_tx<D: KeyValueDB>(
     {
         if !tx_receipt.status.unwrap().is_zero() {
             tracing::debug!(
-                "tx was successfully mined at {}",
+                "tx {:#x} was successfully mined at {}",
+                tx_hash,
                 tx_receipt.block_number.unwrap()
             );
 
-            let mut finalized = state.finalized.lock().unwrap();
-            {
-                finalized.add_hash_at_height(
-                    OUTPLUSONELOG as u32,
-                    job.index,
-                    job.commitment,
-                    false,
-                );
-            }
+            state
+                .finalized
+                .lock()
+                .unwrap()
+                .add_leafs_and_commitments(vec![], vec![(job.index, job.commitment)]);
 
             job.status = JobStatus::Done;
 
-            jobs.transaction().put(
-                JobsDbColumn::Jobs as u32,
-                job.id.as_bytes(),
-                &serde_json::to_vec(&job).unwrap(),
-            );
+            jobs.write({
+                let mut tx = jobs.transaction();
+                tx.put(
+                    JobsDbColumn::Jobs as u32,
+                    job.id.as_bytes(),
+                    &serde_json::to_vec(&job).unwrap(),
+                );
+                tx.delete(JobsDbColumn::TxCheckTasks as u32, job.id.as_bytes());
+                tx
+            })
+            .expect("failed to update job status");
+
             return Ok(JobStatus::Done);
         } else {
-            tracing::debug!("tx was reverted at {}", tx_receipt.block_number.unwrap());
+            tracing::debug!(
+                "tx {:#x} was reverted at {}",
+                tx_hash,
+                tx_receipt.block_number.unwrap()
+            );
 
             let mut pending = state.pending.lock().unwrap();
 
@@ -82,7 +91,7 @@ pub async fn check_tx<D: KeyValueDB>(
 
             pending.rollback(finalized.next_index());
 
-            // For every OTHER transaction waiting to be mined
+            // For every transaction waiting to be mined, including the one that is being processed right now
             for (request_id, _val) in jobs.iter(JobsDbColumn::TxCheckTasks as u32) {
                 // Retrieve and deserialize Job information
                 tracing::info!(
@@ -111,7 +120,7 @@ pub async fn check_tx<D: KeyValueDB>(
                         ops: vec![reject_job_operation, delete_nullifier_operation],
                     };
 
-                    jobs.write(transaction)?;
+                    jobs.write(transaction)?; //TODO: collect all updates in a single transaction for consistency purpose
                 }
             }
         }

@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use actix_web::web::Data;
 use kvdb_memorydb::InMemory;
@@ -9,11 +9,13 @@ use libzeropool::POOL_PARAMS;
 use libzkbob_rs::merkle::MerkleTree;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
+use relayer_rs::contracts::Pool;
 use relayer_rs::startup::Application;
 use relayer_rs::state::{Job, State};
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
-use relayer_rs::tx;
-use tokio::sync::mpsc;
+use relayer_rs::{tx_checker, tx_sender};
+use tokio::sync::mpsc::error::TryRecvError;
+use tokio::sync::mpsc::{self, Receiver};
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::setup;
 use libzeropool::{
@@ -25,15 +27,30 @@ use libzeropool::{
 };
 use wiremock::MockServer;
 
-use crate::generator::Generator;
+use crate::generator::{self, Generator};
 use libzeropool::fawkes_crypto::circuit::cs::CS;
 pub struct TestApp {
     pub config: Settings,
     pub address: String,
     pub port: u16,
+    receiver: Receiver<Job>,
     pub state: Data<State<InMemory>>,
     pub generator: Option<Generator>, // pub pool: Pool
     pub mock_server: MockServer,
+}
+
+impl TestApp {
+    pub async fn process_job(&mut self) {
+        let tree_params = self.config.application.get_tree_params();
+        let pool = Pool::new(Data::new(self.config.web3.clone()))
+            .expect("failed to instantiate pool contract");
+        // tx_sender::receive_one(&self.state, self.receiver, tree_params, pool);
+        match self.receiver.try_recv() {
+            Ok(job) => tx_sender::process_job(job, &self.state, &tree_params, &pool).await,
+            Err(TryRecvError::Empty) => tracing::error!("WTF NO MESSAGE"),
+            Err(error) => tracing::error!("{:#?}", error),
+        };
+    }
 }
 type DB = Data<Mutex<MerkleTree<InMemory, PoolBN256>>>;
 
@@ -99,7 +116,7 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
         tracing::info!("Using pre-built cicuit params specified in the configuration file");
     }
 
-    let (tree_prover_sender, mut tree_prover_receiver) = mpsc::channel::<Data<Job>>(1000);
+    let (tree_prover_sender, receiver) = mpsc::channel::<Job>(1000);
     // let (tx_checker_sender, mut tx_checker_receiver) = mpsc::channel::<Data<Job>>(1000);
 
     let pending: DB = Data::new(Mutex::new(MerkleTree::new_test(POOL_PARAMS.clone())));
@@ -124,8 +141,6 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
             .unwrap_or(prebuilt_vk)
     });
 
-    let pending_clone = pending.clone();
-
     let app = Application::build(
         config.clone(),
         tree_prover_sender,
@@ -148,33 +163,20 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
 
     let mock_server = MockServer::builder().listener(listener).start().await;
 
-    let tree_params = config.application.get_tree_params();
-
-    tokio::spawn(async move {
-        tracing::info!("starting receiver");
-
-        while let Some(job) = tree_prover_receiver.recv().await {
-            let _tx_data = {
-                let mut p = pending_clone.lock().unwrap();
-                let tx_data = tx::build(&job, &p, &tree_params);
-
-                let transaction_request = job.transaction_request.as_ref().unwrap();
-                p.append_hash(transaction_request.proof.inputs[2], false);
-
-                tx_data
-            };
-            // pool.send_tx(tx_data).await;
-        }
-    });
+    // tx_sender::start(&app.state, receiver, tree_params, pool);
+    // tx_checker::start(&app.state);
 
     tokio::spawn(app.run_untill_stopped());
 
-    Ok(TestApp {
+    let test_app = TestApp {
         config,
         address,
+        receiver,
         port,
         state,
         generator,
-        mock_server
-    })
+        mock_server,
+    };
+
+    Ok(test_app)
 }

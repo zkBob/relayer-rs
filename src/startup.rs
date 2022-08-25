@@ -1,16 +1,11 @@
 use crate::{
     configuration::Settings,
     contracts::Pool,
-    routes::transactions::{query, transact},
+    routes::routes,
     state::{Job, State, DB},
 };
 
-use actix_web::{
-    dev::Server,
-    middleware,
-    web::{self, Data},
-    App, HttpServer,
-};
+use actix_web::{dev::Server, web::Data};
 use kvdb::KeyValueDB;
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier::VK};
@@ -28,7 +23,7 @@ pub struct Application<D: 'static + KeyValueDB> {
 impl<D: 'static + KeyValueDB> Application<D> {
     pub async fn build(
         configuration: Settings,
-        sender: Sender<Data<Job>>,
+        sender: Sender<Job>,
         pending: DB<D>,
         finalized: DB<D>,
         jobs: Data<D>, //We don't realy need a mutex, since all jobs/tx are processed independently
@@ -55,7 +50,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
             web3,
         });
 
-        let server = run(listener, state.clone())?;
+        let server = routes::run(listener, state.clone())?;
 
         Ok(Self {
             server,
@@ -73,22 +68,4 @@ impl<D: 'static + KeyValueDB> Application<D> {
         tracing::info!("starting webserver at http://{}:{}", self.host, self.port);
         self.server.await
     }
-}
-
-pub fn run<D: 'static + KeyValueDB>(
-    listener: TcpListener,
-    state: Data<State<D>>,
-) -> Result<Server, std::io::Error> {
-    tracing::info!("starting webserver");
-
-    let server = HttpServer::new(move || {
-        App::new()
-            .wrap(middleware::Logger::default())
-            .route("/tx", web::get().to(query))
-            .route("/transact", web::post().to(transact::<D>))
-            .app_data(state.clone())
-    })
-    .listen(listener)?
-    .run();
-    Ok(server)
 }

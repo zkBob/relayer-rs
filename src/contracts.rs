@@ -9,7 +9,7 @@ use web3::{
         BlockNumber, Bytes, FilterBuilder, Log, LogWithMeta, Transaction, TransactionId,
         TransactionReceipt, H160, H256, U256,
     },
-    Web3,
+    Error as Web3Error, Web3,
 };
 
 use actix_web::web::Data;
@@ -22,15 +22,46 @@ type Events = Vec<LogWithMeta<MessageEvent>>;
 pub struct Pool {
     pub contract: Contract<Http>,
     web3: Web3<Http>,
-}
 
-fn get_web3(config: &Data<Web3Settings>) -> web3::Web3<Http> {
-    let http = web3::transports::Http::new(&config.provider_endpoint)
-        .expect("failed to init web3 provider");
-    web3::Web3::new(http)
+    key: SecretKey,
+    gas_limit: U256,
+    transact_short_signature: Vec<u8>,
 }
 
 impl Pool {
+    pub fn new(config: Data<Web3Settings>) -> Result<Self, SyncError> {
+        let contract_address = H160::from_str(&config.pool_address).expect("bad pool address");
+
+        let http = web3::transports::Http::new(&config.provider_endpoint)
+            .expect("failed to init web3 provider");
+        let web3 = web3::Web3::new(http);
+
+        let contract = Contract::from_json(
+            web3.eth(),
+            contract_address,
+            include_bytes!("../configuration/pool-abi.json"),
+        )
+        .expect("failed to read contract");
+
+        let key =
+            SecretKey::from_str(&config.credentials.secret_key).expect("failed to read secret key");
+
+        let short_signature = contract
+            .abi()
+            .function("transact")
+            .unwrap()
+            .short_signature()
+            .to_vec();
+
+        Ok(Self {
+            contract,
+            web3: web3.clone(),
+            key,
+            gas_limit: U256::from(config.gas_limit),
+            transact_short_signature: short_signature,
+        })
+    }
+
     pub async fn get_transaction(&self, tx_hash: H256) -> Result<Option<Transaction>, web3::Error> {
         self.web3
             .eth()
@@ -43,23 +74,6 @@ impl Pool {
         tx_hash: H256,
     ) -> Result<Option<TransactionReceipt>, web3::Error> {
         self.web3.eth().transaction_receipt(tx_hash).await
-    }
-
-    pub fn new(config: Data<Web3Settings>) -> Result<Self, SyncError> {
-        let contract_address = H160::from_str(&config.pool_address).expect("bad pool address");
-
-        let web3 = get_web3(&config);
-        let contract = Contract::from_json(
-            web3.eth(),
-            contract_address,
-            include_bytes!("../configuration/pool-abi.json"),
-        )
-        .expect("failed to read contract");
-
-        Ok(Self {
-            contract,
-            web3: web3.clone(),
-        })
     }
 
     pub async fn check_nullifier(&self, nullifier: &str) -> Result<bool, web3::error::Error> {
@@ -150,18 +164,27 @@ impl Pool {
         Ok(logs)
     }
 
-    pub async fn send_tx(&self, tx_data: String) {
-        let key =
-            SecretKey::from_str("6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c")
-                .unwrap();
-        self.contract
-            .signed_call(
-                "transact",
-                hex::decode(tx_data).unwrap(),
-                Options::default(),
-                &key,
-            )
+    pub async fn send_tx(&self, tx_data: Vec<u8>) -> Result<H256, String> {
+        let fn_data: Vec<u8> = vec![self.transact_short_signature.clone(), tx_data].concat();
+
+        let gas_price = self.gas_price().await.map_err(|e| e.to_string())?;
+
+        let options = Options {
+            gas: Some(self.gas_limit),
+            gas_price: Some(gas_price),
+            ..Default::default()
+        };
+
+        let tx_hash = self
+            .contract
+            .signed_call_raw(fn_data, options, &self.key)
             .await
-            .unwrap();
+            .map_err(|e| e.to_string())?;
+
+        Ok(tx_hash)
+    }
+
+    async fn gas_price(&self) -> Result<U256, Web3Error> {
+        self.web3.eth().gas_price().await
     }
 }

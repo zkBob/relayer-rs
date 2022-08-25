@@ -20,6 +20,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "actix-cors"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02a0adcaabb68f1dfe8880cb3c5f049261c68f5d69ce06b6f3a930f31710838e"
+dependencies = [
+ "actix-utils",
+ "actix-web",
+ "derive_more",
+ "futures-util",
+ "log",
+ "once_cell",
+ "smallvec",
+]
+
+[[package]]
 name = "actix-http"
 version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2628,6 +2643,7 @@ checksum = "49b3de9ec5dc0a3417da371aab17d729997c15010e7fd24ff707773a33bddb64"
 name = "relayer-rs"
 version = "0.1.0"
 dependencies = [
+ "actix-cors",
  "actix-http",
  "actix-rt",
  "actix-web",
@@ -3788,7 +3804,7 @@ dependencies = [
 [[package]]
 name = "web3"
 version = "0.19.0"
-source = "git+https://github.com/r0wdy1/rust-web3?branch=logs_txhash#d838f474d2d40316dd83e277df1cfa622013b706"
+source = "git+https://github.com/r0wdy1/rust-web3?branch=logs_txhash#4e96eed9efda50486cd1fc4bafe06427c2ab6380"
 dependencies = [
  "arrayvec 0.7.2",
  "base64",
