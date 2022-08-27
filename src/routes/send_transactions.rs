@@ -14,6 +14,8 @@ use libzeropool::fawkes_crypto::{
     ff_uint::Num,
 };
 
+use tracing_futures::Instrument;
+
 use crate::{
     helpers::{self, serialize},
     state::{Job, JobStatus, JobsDbColumn, State},
@@ -96,6 +98,7 @@ pub async fn transact<D: KeyValueDB>(
         .as_ref()
         .map(|id| Uuid::parse_str(&id).unwrap())
         .unwrap_or(Uuid::new_v4());
+    let span = tracing::debug_span!("received request", %request_id);
 
     // 1. check nullifier for double spend
 
@@ -106,7 +109,12 @@ pub async fn transact<D: KeyValueDB>(
         nullifier
     );
     let pool = &state.pool;
-    if !pool.check_nullifier(&nullifier.to_string()).await.unwrap() {
+    if !pool
+        .check_nullifier(&nullifier.to_string())
+        .instrument(span)
+        .await
+        .unwrap()
+    {
         let error_message = format!(
             "request_id: {}, Nullifier {:#?} , Double spending detected",
             request_id, &nullifier
@@ -195,7 +203,7 @@ pub async fn transact<D: KeyValueDB>(
             },
         ],
     })?;
-    state.sender.send(job).await.unwrap();
+    state.sender.send(job).in_current_span().await.unwrap();
 
     let body = serde_json::to_string(&Response {
         job_id: request_id.as_hyphenated().to_string(),
