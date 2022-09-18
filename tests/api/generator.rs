@@ -7,7 +7,6 @@ use libzeropool::{
     },
     native::boundednum::BoundedNum,
 };
-use relayer_rs::routes::send_transactions::{TransactionRequest, Proof};
 
 
 use libzeropool::POOL_PARAMS;
@@ -16,6 +15,7 @@ use libzkbob_rs::proof::prove_tx;
 use libzkbob_rs::client::{state::State, TxType, UserAccount};
 use rand::Rng;
 
+use relayer_rs::types::transaction_request::{TransactionRequest, Proof};
 use secp256k1::SecretKey;
 use uuid::Uuid;
 

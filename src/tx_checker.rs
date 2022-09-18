@@ -5,7 +5,8 @@ use tokio::task;
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
 
 use crate::helpers::serialize;
-use crate::state::{Job, JobStatus, JobsDbColumn, State};
+use crate::state::{JobsDbColumn, State};
+use crate::types::job::{Job, JobStatus};
 
 pub fn start<D: KeyValueDB>(state: &Data<State<D>>) -> () {
     let state = state.clone();

@@ -8,7 +8,7 @@ use kvdb::KeyValueDB;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::state::{State, JobStatus, Job, JobsDbColumn};
+use crate::{state::{State, JobsDbColumn}, types::job::{Job, JobStatus}};
 
 use super::ServiceError;
 

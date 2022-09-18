@@ -8,3 +8,4 @@ pub mod tx_checker;
 pub mod tx_sender;
 pub mod tx;
 pub mod helpers;
+pub mod types;

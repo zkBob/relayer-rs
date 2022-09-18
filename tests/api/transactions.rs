@@ -3,9 +3,8 @@ use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
 use libzeropool::constants::OUT;
 use libzeropool::fawkes_crypto::ff_uint::Num;
 use relayer_rs::{
-    routes::send_transactions::TransactionRequest,
-    state::{Job, JobStatus, JobsDbColumn},
-    tx_checker::check_tx,
+    state::{JobsDbColumn},
+    tx_checker::check_tx, types::{transaction_request::TransactionRequest, job::{Job, JobStatus}},
 };
 
 use serde_json::{json, Value};

@@ -4,9 +4,8 @@ use relayer_rs::{
     configuration::get_config,
     contracts::Pool,
     startup::Application,
-    state::Job,
     telemetry::{get_subscriber, init_subscriber},
-    tx_checker, tx_sender,
+    tx_checker, tx_sender, types::job::Job,
 };
 
 use libzeropool::POOL_PARAMS;
