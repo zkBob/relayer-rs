@@ -5,7 +5,7 @@ use relayer_rs::{
     contracts::Pool,
     startup::Application,
     state::Job,
-    telemetry::{get_subscriber, init_subscriber},
+    telemetry::init_subscriber,
     tx_checker, tx_sender,
 };
 
@@ -19,11 +19,11 @@ use kvdb_rocksdb::{Database, DatabaseConfig};
 
 #[actix_web::main]
 async fn main() -> Result<(), std::io::Error> {
-    init_subscriber(get_subscriber(
-        "relayer".into(),
-        "trace".into(),
-        std::io::stdout,
-    ));
+    // init_subscriber(get_subscriber(
+    //     "relayer".into(),
+    //     "trace".into(),
+    //     std::io::stdout,
+    // ));
 
     let configuration = get_config().expect("failed to get configuration");
 

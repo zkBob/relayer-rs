@@ -20,10 +20,10 @@ borsh = "0.9.1"
 libzkbob-rs = {version = "0.5.0", features = ["native"]}
 tracing = { version = "0.1.29", features = ["log"] }
 tracing-futures = "0.2.5"
-tracing-subscriber = { version = "0.2.12", features = ["registry", "env-filter"] }
-tracing-bunyan-formatter = "0.2.6"
+tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"] }
+tracing-bunyan-formatter = "0.3.3"
 tracing-log = "0.1.2"
-tracing-actix-web = "0.5.1"
+tracing-actix-web = "0.6.1"
 kvdb = "0.9.0"
 kvdb-web = { version = "0.9.0", optional = true }
 kvdb-memorydb = "0.9.0"
@@ -38,6 +38,10 @@ memo-parser = {git = "https://github.com/zkBob/memo-parser", branch = "develop"}
 # memo-parser = {path = "../memo-parser"}
 hex = "0.4.3"
 num-bigint = "0.4"
+opentelemetry-jaeger = "0.17.0"
+opentelemetry = { version = "0.18.0", features = ["rt-tokio"] }
+tracing-opentelemetry = "0.18.0"
+actix-web-opentelemetry = { version = "0.12", features = ["metrics"] }
 [dependencies.uuid]
 version = "1.1.2"
 features = [
