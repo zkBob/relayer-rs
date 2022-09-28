@@ -12,13 +12,9 @@ use kvdb::KeyValueDB;
 // use opentelemetry::{
 //     sdk::export::trace::
 // };
-use opentelemetry::{global, sdk::propagation::TraceContextPropagator};
-use opentelemetry::trace::Tracer;
-use tracing_subscriber::prelude::*;
-use opentelemetry_jaeger::new_agent_pipeline;
-use tracing_subscriber::Registry;
-use actix_web_opentelemetry::RequestTracing;
 use crate::{routes, state::State};
+use actix_web_opentelemetry::RequestTracing;
+
 
 pub fn run<D: 'static + KeyValueDB>(
     listener: TcpListener,
@@ -28,26 +24,12 @@ pub fn run<D: 'static + KeyValueDB>(
 
     let server = HttpServer::new(move || {
 
-        global::set_text_map_propagator(TraceContextPropagator::new());
-
-        let tracer = new_agent_pipeline()
-            .with_service_name("app_name")
-            //.install_batch TODO: requires passing a runtime all the way from entry point
-            .install_simple()
-            .unwrap();
-            
         let cors = Cors::default()
             .allow_any_origin()
             .allowed_methods(vec!["GET", "POST"])
             .allowed_header(header::CONTENT_TYPE)
             .max_age(3600);
 
-            Registry::default()
-            .with(tracing_subscriber::EnvFilter::new("INFO"))
-            .with(tracing_subscriber::fmt::layer())
-            .with(tracing_opentelemetry::layer().with_tracer(tracer))
-            .init();
-            
         App::new()
             .wrap(cors)
             .wrap(RequestTracing::new())
