@@ -12,7 +12,7 @@ use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::contracts::Pool;
 use relayer_rs::startup::Application;
 use relayer_rs::state::{Job, State};
-use relayer_rs::telemetry::{get_subscriber, init_subscriber};
+use relayer_rs::telemetry::{init_subscriber, stdout_subscriber, sinc_subscriber};
 use relayer_rs::{tx_checker, tx_sender};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{self, Receiver};
@@ -56,13 +56,9 @@ type DB = Data<Mutex<MerkleTree<InMemory, PoolBN256>>>;
 
 static TRACING: Lazy<()> = Lazy::new(|| {
     if std::env::var("TEST_LOG").is_ok() {
-        init_subscriber(get_subscriber(
-            "test".into(),
-            "info".into(),
-            std::io::stdout,
-        ))
+        init_subscriber(stdout_subscriber("test".into(), "info".into()))
     } else {
-        init_subscriber(get_subscriber("test".into(), "info".into(), std::io::sink))
+        init_subscriber(sinc_subscriber("test".into(), "info".into()))
     }
 });
 
