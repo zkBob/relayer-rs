@@ -15,6 +15,7 @@ mod job;
 pub mod routes;
 pub mod send_transactions;
 mod transactions;
+pub mod wallet_screening;
 
 #[derive(Debug)]
 pub enum ServiceError {

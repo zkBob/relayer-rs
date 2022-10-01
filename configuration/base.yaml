@@ -14,5 +14,7 @@ web3:
   pool_address: c89ce4735882c9f0f0fe26686c53074e09b0d550
   gas_limit: 2000000
   scheduler_interval_sec: 5
+  trm_endpoint: http://localhost:8988
   credentials:
       secret_key: 6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c
+      trm_api_key: api_key  

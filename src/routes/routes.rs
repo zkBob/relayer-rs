@@ -10,7 +10,7 @@ use actix_web::{
 };
 use kvdb::KeyValueDB;
 
-use crate::{routes, state::State};
+use crate::{routes::{self, wallet_screening}, state::State};
 
 pub fn run<D: 'static + KeyValueDB>(
     listener: TcpListener,
@@ -40,6 +40,10 @@ pub fn run<D: 'static + KeyValueDB>(
             .route(
                 "/sendTransactions",
                 web::post().to(routes::send_transactions::<D>),
+            )
+            .route(
+                "/wallet_screening",
+                web::post().to(wallet_screening::get_wallet_screening_result::<D>)
             )
             .app_data(state.clone())
     })

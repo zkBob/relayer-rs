@@ -19,7 +19,8 @@ pub struct ApplicationSettings {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Credentials {
-    pub secret_key: String
+    pub secret_key: String,
+    pub trm_api_key: String
 }
 
 #[derive(Serialize,Deserialize,Clone,Debug)]
@@ -31,7 +32,8 @@ pub struct Web3Settings {
     pub gas_limit: u64,
     #[serde(skip_serializing)]
     pub credentials: Credentials,
-    pub scheduler_interval_sec: u64
+    pub scheduler_interval_sec: u64,
+    pub trm_endpoint: String,
 }
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier, Parameters};
