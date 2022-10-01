@@ -1,11 +1,10 @@
 use std::{
     sync::Mutex,
-    thread::sleep,
-    time::{Duration, SystemTime},
+    time::SystemTime, io,
 };
 
 use actix_web::web::{self, Data};
-use kvdb::{DBOp::Insert, DBTransaction, KeyValueDB};
+use kvdb::{DBOp::Insert, DBTransaction, KeyValueDB, DBKey};
 use libzeropool::{
     constants::OUT,
     fawkes_crypto::{
@@ -17,14 +16,13 @@ use libzeropool::{
 };
 use libzkbob_rs::merkle::MerkleTree;
 use memo_parser::memoparser;
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
-use web3::types::{BlockNumber, Transaction as Web3Transaction};
+use web3::types::BlockNumber;
 
 use crate::{
-    configuration::Web3Settings, contracts::Pool, routes::send_transactions::TransactionRequest,
-    tx_checker::check_tx, helpers,
+    configuration::Web3Settings, contracts::Pool,
+    helpers, types::job::{Job, JobStatus},
 };
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -48,41 +46,12 @@ impl From<web3::contract::Error> for SyncError {
     }
 }
 
-#[derive(Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum JobStatus {
-    Created = 0, //Waiting for provers to get the task
-    Proving = 1, //Generating tree update proofs
-    Mining = 2,  //Waiting for tx receipt
-    Done = 3,    //
-    Rejected = 4,//This transaction or one of the preceeding tx in the queue were reverted
-}
-
 pub enum JobsDbColumn {
     Jobs = 0,
     JobsIndex = 1,
     Nullifiers = 2,
     TxCheckTasks = 3 // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective, 
                      //so we copy only those keys that require transaction receipt check
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Job {
-    pub id: String,
-    pub created: SystemTime,
-    pub status: JobStatus,
-    pub transaction_request: Option<TransactionRequest>,
-    pub transaction: Option<Web3Transaction>,
-    pub index: u64,
-    pub commitment: Num<Fr>,
-    pub root: Option<Num<Fr>>,
-    pub nullifier: Num<Fr>,
-    pub memo: Vec<u8> // TODO: duplicates transaction_request.memo
-}
-
-impl Job {
-    pub fn reject(mut self) -> () {
-        self.status = JobStatus::Rejected;
-    }
 }
 
 pub struct State<D: 'static + KeyValueDB> {
@@ -150,8 +119,6 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 finalized.get_root().to_string()
                             );
 
-                            use kvdb::DBKey;
-
                             let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
                                 Uint::from_big_endian(&calldata.nullifier),
                             ));
@@ -207,28 +174,57 @@ impl<D: 'static + KeyValueDB> State<D> {
         Ok(())
     }
 
-    pub fn start_poller(self) -> () {
-        let jobs: Vec<Job> = self
-            .jobs
-            .iter(JobsDbColumn::TxCheckTasks as u32)
-            .map(|(_k, v)| serde_json::from_slice(&v[..]).unwrap())
-            .collect();
-        tokio::spawn(async move {
-            let state = Data::new(self);
-            for job in jobs.into_iter() {
-                let state = state.clone();
-                tracing::debug!("polling started at {:?}", SystemTime::now());
-                match check_tx(job, state).await {
-                    Err(_) | Ok(JobStatus::Rejected) => {
-                        tracing::warn!(
-                            "caught error / revert " // TODO: add job id
-                        );
+    pub fn save_new_job(&self, job: &Job) -> io::Result<()> {
+        let nullifier_key = DBKey::from_slice(&helpers::serialize(job.nullifier).unwrap());
+
+        self.jobs.write(DBTransaction {
+            ops: vec![
+                /*
+                Saving Job info with transaction request to be later retrieved by client
+                In case of rollback an existing row is mutated
+                TODO: use Borsh instead of JSON
+                */
+                Insert {
+                    col: JobsDbColumn::Jobs as u32,
+                    key: DBKey::from_slice(job.id.as_bytes()),
+                    value: serde_json::to_string(&job).unwrap().as_bytes().to_vec(),
+                },
+                /*
+                Saving nullifiers to avoid double spend spam-atack.
+                Nullifiers are stored to persistent DB, if rollback happens, they get deleted individually
+                 */
+                Insert {
+                    col: JobsDbColumn::Nullifiers as u32,
+                    key: nullifier_key,
+                    value: vec![],
+                },
+            ],
+        })
+    }
+
+    pub fn get_jobs(&self, offset: u64, limit: u64) -> Result<Vec<Job>, String> {
+        let mut jobs = vec![];
+        let mut index = offset;
+        for _ in 0..limit {
+            let job_id = self
+                .jobs
+                .get(JobsDbColumn::JobsIndex as u32, &index.to_be_bytes());
+            if let Ok(Some(job_id)) = job_id {
+                let job = self.jobs.get(JobsDbColumn::Jobs as u32, &job_id);
+                if let Ok(Some(job)) = job {
+                    let job: Job = serde_json::from_slice(&job).unwrap();
+                    if job.transaction.is_none() {
                         break;
                     }
-                    _ => (),
+                    jobs.push(job);
+                    index += (OUT + 1) as u64;
+                } else {
+                    break;
                 }
+            } else {
+                break;
             }
-            sleep(Duration::from_secs(5));
-        });
+        }
+        Ok(jobs)
     }
 }

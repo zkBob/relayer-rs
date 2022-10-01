@@ -6,8 +6,8 @@ use web3::types::Transaction;
 
 use crate::{
     contracts::Pool,
-    state::{Job, JobStatus, JobsDbColumn, State},
-    tx,
+    state::{JobsDbColumn, State},
+    tx, types::job::{Job, JobStatus},
 };
 
 pub fn start<D: KeyValueDB>(

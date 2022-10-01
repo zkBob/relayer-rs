@@ -2,7 +2,7 @@ use crate::{
     configuration::Settings,
     contracts::Pool,
     routes::routes,
-    state::{Job, State, DB},
+    state::{State, DB}, types::job::Job,
 };
 
 use actix_web::{dev::Server, web::Data};
