@@ -38,7 +38,7 @@ memo-parser = {git = "https://github.com/zkBob/memo-parser", branch = "develop"}
 # memo-parser = {path = "../memo-parser"}
 hex = "0.4.3"
 num-bigint = "0.4"
-opentelemetry-jaeger = "0.17.0"
+opentelemetry-jaeger = { version = "0.17.0", features = ["rt-tokio"] }
 opentelemetry = { version = "0.18.0", features = ["rt-tokio","rt-tokio-current-thread"] }
 tracing-opentelemetry = "0.18.0"
 actix-web-opentelemetry = { version = "0.13", features = ["metrics"] }
