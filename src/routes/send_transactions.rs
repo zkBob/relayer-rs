@@ -14,6 +14,7 @@ use libzeropool::fawkes_crypto::{
     ff_uint::Num,
 };
 
+use tracing::instrument::WithSubscriber;
 use tracing_futures::Instrument;
 
 use crate::{
@@ -112,6 +113,7 @@ pub async fn transact<D: KeyValueDB>(
     if !pool
         .check_nullifier(&nullifier.to_string())
         .instrument(span)
+        .with_current_subscriber()
         .await
         .unwrap()
     {

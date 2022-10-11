@@ -12,7 +12,7 @@ use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::contracts::Pool;
 use relayer_rs::startup::Application;
 use relayer_rs::state::{Job, State};
-use relayer_rs::telemetry::{init_subscriber, stdout_subscriber, sinc_subscriber};
+use relayer_rs::telemetry::{ init_stdout, init_sink};
 use relayer_rs::{tx_checker, tx_sender};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{self, Receiver};
@@ -44,10 +44,9 @@ impl TestApp {
         let tree_params = self.config.application.get_tree_params();
         let pool = Pool::new(Data::new(self.config.web3.clone()))
             .expect("failed to instantiate pool contract");
-        // tx_sender::receive_one(&self.state, self.receiver, tree_params, pool);
         match self.receiver.try_recv() {
             Ok(job) => tx_sender::process_job(job, &self.state, &tree_params, &pool).await,
-            Err(TryRecvError::Empty) => tracing::error!("WTF NO MESSAGE"),
+            Err(TryRecvError::Empty) => tracing::error!("No messages"),
             Err(error) => tracing::error!("{:#?}", error),
         };
     }
@@ -56,9 +55,9 @@ type DB = Data<Mutex<MerkleTree<InMemory, PoolBN256>>>;
 
 static TRACING: Lazy<()> = Lazy::new(|| {
     if std::env::var("TEST_LOG").is_ok() {
-        init_subscriber(stdout_subscriber("test".into(), "info".into()))
+        init_stdout("test".into(), "info".into())
     } else {
-        init_subscriber(sinc_subscriber("test".into(), "info".into()))
+        init_sink("test".into(), "info".into())
     }
 });
 

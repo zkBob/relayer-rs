@@ -1,13 +1,12 @@
-use opentelemetry::sdk::trace::Tracer;
-use tracing::subscriber::set_global_default;
+use config::Config;
 use tracing::Subscriber;
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
-// use tracing_subscriber::fmt::MakeWriter;
+use opentelemetry::global;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{EnvFilter, Registry};
-use opentelemetry::{global, sdk::propagation::TraceContextPropagator};
-use opentelemetry_jaeger::new_agent_pipeline;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::{EnvFilter, Registry};
+
+use crate::configuration::Settings;
 
 // pub fn get_subscriber<'a,W:std::io::Write>(
 //     name: String,
@@ -20,56 +19,87 @@ use tracing_subscriber::prelude::*;
 //     let subscriber = Registry::default()
 //         .with(env_filter)
 //         .with(JsonStorageLayer);
-        
+
 //     subscriber
 // }
 
-pub fn stdout_subscriber(name: String,env_filter: String)  -> impl Subscriber + Send + Sync {
+pub fn init_stdout(name: String, env_filter: String) {
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(env_filter));
+
+    let formatting_layer = BunyanFormattingLayer::new(name, || std::io::stdout());
+    Registry::default()
+        .with(env_filter)
+        .with(formatting_layer)
+        .with(JsonStorageLayer)
+        .init();
+
     
-        let formatting_layer = BunyanFormattingLayer::new(name, ||std::io::stdout());
+}
+
+pub fn init_sink(name: String, env_filter: String)  {
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(env_filter));
+
+    let formatting_layer = BunyanFormattingLayer::new(name, || std::io::sink());
     let subscriber = Registry::default()
         .with(env_filter)
         .with(formatting_layer)
-        .with(JsonStorageLayer);
-        
+        .with(JsonStorageLayer)
+        .init();
 
-    subscriber
-}
-
-pub fn sinc_subscriber(name: String,env_filter: String)  -> impl Subscriber + Send + Sync {
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(env_filter));
     
-        let formatting_layer = BunyanFormattingLayer::new(name, ||std::io::sink());
-    let subscriber = Registry::default()
-        .with(env_filter)
-        .with(formatting_layer)
-        .with(JsonStorageLayer);
+}
+
+pub fn init_jaeger(name: String, log_level: String , endpoint: &Option<String>)  { //TODO: cleanup
+    global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+
+    if let Some(agent_endpoint) = endpoint {
+        let tracer = opentelemetry_jaeger::new_agent_pipeline()
+        .with_service_name(name)
+        .with_endpoint(agent_endpoint)
+        .install_batch(opentelemetry::runtime::Tokio)
+        .unwrap();
+
+        Registry::default()
+        .with(tracing_subscriber::EnvFilter::new(log_level))
+        .with(tracing_subscriber::fmt::layer().with_target(false))
+        .with(tracing_opentelemetry::layer().with_tracer(tracer))
+        .init();
+
+    } else {
+        let tracer = opentelemetry_jaeger::new_agent_pipeline()
+        .with_service_name(name)
+        .install_batch(opentelemetry::runtime::Tokio)
+        .unwrap();
+
+        Registry::default()
+        .with(tracing_subscriber::EnvFilter::new(log_level))
+        .with(tracing_subscriber::fmt::layer().with_target(false))
+        .with(tracing_opentelemetry::layer().with_tracer(tracer))
+        .init();
+    }
+    
+    
         
-
-    subscriber
 }
 
-pub fn jaeger_subscriber(tracer: Tracer) -> impl Subscriber + Send + Sync{
 
-    global::set_text_map_propagator(TraceContextPropagator::new());
+pub fn setup_telemetry(config: &Settings) {
 
-        let subscriber = Registry::default()
-            .with(tracing_subscriber::EnvFilter::new("INFO"))
-            .with(tracing_subscriber::fmt::layer())
-            .with(tracing_opentelemetry::layer().with_tracer(tracer));
+    let name = "zkbob-relayer".to_string();
+    let telemetry_settings= &config.application.telemetry;
+    let log_level = telemetry_settings.log_level.into();
+    
 
-       subscriber
+    match config.application.telemetry.kind {
+        crate::configuration::TelemetryKind::Stdout => init_stdout(name, log_level),
+        crate::configuration::TelemetryKind::Jaeger => {
+            // let endpoint = telemetry_settings.endpoint.as_ref().expect("endpoint is needed for jaeger");
+            
+            
+            init_jaeger(name, log_level, &telemetry_settings.endpoint)
+        },
+    }
 
-}
-
-pub fn init_subscriber2(subscriber: impl Subscriber + Send + Sync) {
-    tracing::info_span!("WTF!!!");
-    subscriber.init();
-}
-
-pub fn init_subscriber(subscriber: impl Subscriber + Send + Sync) {
-    set_global_default(subscriber).expect("failed to get subscriber");
 }
