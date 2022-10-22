@@ -11,7 +11,7 @@ use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::contracts::Pool;
 use relayer_rs::startup::Application;
-use relayer_rs::state::{State};
+use relayer_rs::state::State;
 use relayer_rs::telemetry::{get_subscriber, init_subscriber};
 use relayer_rs::types::job::Job;
 use relayer_rs::{tx_checker, tx_sender};
@@ -69,9 +69,16 @@ static TRACING: Lazy<()> = Lazy::new(|| {
 
 pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
     Lazy::force(&TRACING);
+
+    let mock_listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("failed to start listene for mock server");
+
+    let mock_server = MockServer::builder().listener(mock_listener).start().await;
+
     let config: Settings = {
         let mut c = get_config().expect("failed to get config");
         c.application.port = 0;
+        c.web3.trm_endpoint = format!("http://127.0.0.1:{}/trm_mock", mock_server.address().port());
         c
     };
 
@@ -160,10 +167,6 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
     let port = app.port();
 
     let address = format!("http://127.0.0.1:{}", port);
-
-    let listener = std::net::TcpListener::bind("0.0.0.0:8546").expect("failed to start listener");
-
-    let mock_server = MockServer::builder().listener(listener).start().await;
 
     // tx_sender::start(&app.state, receiver, tree_params, pool);
     // tx_checker::start(&app.state);
