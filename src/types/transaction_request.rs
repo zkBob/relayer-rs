@@ -67,7 +67,7 @@ impl TransactionRequest {
         };
         let parsed_memo = Memo::parse_memoblock(&tx_memo_bytes.unwrap(), tx_type);
     
-        if parsed_memo.fee < state.web3.relayer_fee {
+        if parsed_memo.fee < state.settings.web3.relayer_fee {
             tracing::warn!(
                 "request_id: {}, fee {:#?} , Fee too low!",
                 request_id,

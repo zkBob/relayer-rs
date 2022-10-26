@@ -46,7 +46,7 @@ async fn main() -> Result<(), std::io::Error> {
     let finalized = Data::new(Mutex::new(finalized));
 
     let tree_params = configuration.application.get_tree_params();
-    let pool = Pool::new(Data::new(configuration.web3.clone()))
+    let pool = Pool::new(&Data::new(configuration.web3.clone()))
         .expect("failed to instantiate pool contract");
 
     let app = Application::build(

@@ -43,7 +43,7 @@ pub struct TestApp {
 impl TestApp {
     pub async fn process_job(&mut self) {
         let tree_params = self.config.application.get_tree_params();
-        let pool = Pool::new(Data::new(self.config.web3.clone()))
+        let pool = Pool::new(&self.config.web3)
             .expect("failed to instantiate pool contract");
         // tx_sender::receive_one(&self.state, self.receiver, tree_params, pool);
         match self.receiver.try_recv() {
@@ -78,7 +78,8 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
     let config: Settings = {
         let mut c = get_config().expect("failed to get config");
         c.application.port = 0;
-        c.web3.trm_endpoint = format!("http://127.0.0.1:{}/trm_mock", mock_server.address().port());
+        c.trm.port =  mock_server.address().port();
+        // c.web3.trm_endpoint = format!("http://127.0.0.1:{}/trm_mock", mock_server.address().port());
         c
     };
 

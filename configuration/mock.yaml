@@ -1,2 +1,4 @@
 web3:
   provider_endpoint: http://0.0.0.0:8546
+trm:
+  path: /trm_mock

@@ -13,6 +13,6 @@ pub async fn fee<D: KeyValueDB>(state: Data<State<D>>) -> Result<HttpResponse, S
     }
 
     Ok(HttpResponse::Ok().json(FeeResponse {
-        fee: state.web3.relayer_fee.to_string(),
+        fee: state.settings.web3.relayer_fee.to_string(),
     }))
 }

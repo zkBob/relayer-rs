@@ -29,7 +29,7 @@ pub struct Pool {
 }
 
 impl Pool {
-    pub fn new(config: Data<Web3Settings>) -> Result<Self, SyncError> {
+    pub fn new(config: &Web3Settings) -> Result<Self, SyncError> {
         let contract_address = H160::from_str(&config.pool_address).expect("bad pool address");
 
         let http = web3::transports::Http::new(&config.provider_endpoint)

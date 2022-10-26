@@ -33,7 +33,7 @@ pub fn start<D: KeyValueDB>(state: &Data<State<D>>) -> () {
                     _ => (),
                 }
             }
-            tokio::time::sleep(Duration::from_secs(state.web3.scheduler_interval_sec)).await;
+            tokio::time::sleep(Duration::from_secs(state.settings.web3.scheduler_interval_sec)).await;
         }
     });
 }

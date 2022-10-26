@@ -11,8 +11,9 @@ use crate::helpers::spawn_app;
 pub async fn test_trm_route() {
     let app = spawn_app(false).await.unwrap();
 
+    let service_path  = "/trm_mock".to_string();
     Mock::given(method("POST"))
-        .and(path("/trm_mock"))
+        .and(path(&service_path))
         // .and(header("Authorization","Basic "))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!(
             {
@@ -69,7 +70,7 @@ pub async fn test_trm_route() {
         .mount(&app.mock_server)
         .await;
 
-    let screening_service_endpoint = format!("{}/wallet_screening", &app.address);
+    let screening_service_endpoint = format!("{}{}", &app.address,"/wallet_screening");
 
     tracing::warn!("screening_service_endpoint: {}", screening_service_endpoint);
     let middleware_response = reqwest::Client::new()

@@ -31,14 +31,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
     ) -> Result<Self, std::io::Error> {
         tracing::info!("using config {:#?}", configuration);
         let vk = vk.unwrap_or(configuration.application.get_tx_vk().unwrap());
-        let host = configuration.application.host;
-        let address = format!("{}:{}", host, configuration.application.port);
-        let web3 = Data::new(configuration.web3);
-
-        let listener = TcpListener::bind(address)?;
-        let port = listener.local_addr().unwrap().port();
-
-        let pool = Pool::new(web3.clone()).expect("failed to instantiate pool contract");
+        let pool = Pool::new(&configuration.web3).expect("failed to instantiate pool contract");
 
         let state = Data::new(State {
             pending,
@@ -47,9 +40,13 @@ impl<D: 'static + KeyValueDB> Application<D> {
             pool,
             jobs,
             sender: Data::new(sender),
-            web3,
+            settings: Data::new(configuration.clone())
         });
 
+        let host = configuration.application.host;
+        let address = format!("{}:{}", host, configuration.application.port);
+        let listener = TcpListener::bind(address)?;
+        let port = listener.local_addr().unwrap().port();
         let server = routes::run(listener, state.clone())?;
 
         Ok(Self {

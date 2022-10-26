@@ -21,7 +21,7 @@ use uuid::Uuid;
 use web3::types::BlockNumber;
 
 use crate::{
-    configuration::Web3Settings, contracts::Pool,
+    configuration::{Web3Settings, Settings}, contracts::Pool,
     helpers, types::job::{Job, JobStatus},
 };
 
@@ -55,7 +55,7 @@ pub enum JobsDbColumn {
 }
 
 pub struct State<D: 'static + KeyValueDB> {
-    pub web3: Data<Web3Settings>,
+    pub settings: Data<Settings>,
     pub pending: DB<D>,
     pub jobs: Data<D>,
     pub finalized: DB<D>,

@@ -2,6 +2,7 @@ use actix_web::{
     web::{self, Data},
     HttpResponse,
 };
+use tracing::Instrument;
 
 use crate::{
     state::State,
@@ -17,17 +18,18 @@ pub async fn make_trm_request(
     endpoint: &str,
     api_key: &str,
 ) -> Result<WalletScreeningResponse, ServiceError> {
-
+    // let span =  tracing::debug_span!("received request for screening", address = request.address);
     let response = reqwest::Client::new()
         .post(endpoint)
         .body(serde_json::to_string(&request).unwrap())
         .basic_auth(&api_key, Some(&api_key))
         .send()
         .await
+        // .instrument(span)
         .unwrap()
         .error_for_status()
         .map_err(|e| {
-            tracing::error!("error caught {:#?}", e);
+            tracing::error!("tmr returned error {:#?}", e);
             ServiceError::InternalError
         })?;
 
@@ -41,17 +43,15 @@ pub async fn get_wallet_screening_result<D: kvdb::KeyValueDB>(
     state: Data<State<D>>,
 ) -> Result<HttpResponse, actix_web::Error> {
     tracing::info!("received request {:#?}", request);
-    let web3 = &state.web3;
-    let api_key = &web3.credentials.trm_api_key;
-    let request:WalletScreeningRequest = request.0.into();
-    make_trm_request(request, &web3.trm_endpoint, api_key.as_str())
+    let trm = &state.settings.trm;
+    let api_key = &trm.api_key;
+    let request: WalletScreeningRequest = request.0.into();
+    let endpoint = format!("{}:{}{}", trm.host, trm.port, trm.path);
+    tracing::info!("using trm endpoint {}", endpoint);
+    make_trm_request(request, endpoint.as_str(), api_key.as_str())
         .await
         .map(|v| HttpResponse::Ok().json(v))
-        .map_err(|e| {
-
-            tracing::error!("tmr returned error {:#?}", e );
-            e.into()
-        })
+        .map_err(|e| e.into())
 }
 
 #[cfg(test)]

@@ -4,7 +4,8 @@ use serde_aux::field_attributes::deserialize_number_from_string;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Settings {
     pub application: ApplicationSettings,
-    pub web3: Web3Settings
+    pub web3: Web3Settings,
+    pub trm: TRMSettings
 }
 
 #[derive(Serialize, Deserialize, Clone,Debug)]
@@ -20,7 +21,6 @@ pub struct ApplicationSettings {
 #[derive(Deserialize, Debug, Clone)]
 pub struct Credentials {
     pub secret_key: String,
-    pub trm_api_key: String
 }
 
 #[derive(Serialize,Deserialize,Clone,Debug)]
@@ -33,7 +33,16 @@ pub struct Web3Settings {
     #[serde(skip_serializing)]
     pub credentials: Credentials,
     pub scheduler_interval_sec: u64,
-    pub trm_endpoint: String,
+    // pub trm_endpoint: String,
+}
+
+#[derive(Serialize,Deserialize,Clone,Debug)]
+pub struct TRMSettings {
+    pub host: String,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    pub port: u16,
+    pub path: String,
+    pub api_key: String
 }
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier, Parameters};
