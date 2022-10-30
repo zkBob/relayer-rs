@@ -104,7 +104,8 @@ pub enum Environment {
     Production,
     Kovan,
     Mock,
-    Anvil
+    Anvil,
+    Goerli
 }
 
 impl Environment {
@@ -115,6 +116,7 @@ impl Environment {
             Environment::Production => "production.yaml",
             Environment::Mock => "mock.yaml",
             Environment::Anvil => "anvil.yaml",
+            Environment::Goerli => "goerli.yaml",
 
         }
     }
@@ -130,6 +132,7 @@ impl TryFrom<String> for Environment {
             "kovan" => Ok(Self::Kovan),
             "mock" => Ok(Self::Mock),
             "anvil" => Ok(Self::Anvil),
+            "goerli" => Ok(Self::Goerli),
             _other => Err(format!("failed to parse {}", s)),
         }
     }

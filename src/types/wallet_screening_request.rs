@@ -10,7 +10,9 @@ pub struct WalletScreeningRequest {
     pub chain: String,
 }
 #[derive(Serialize,Deserialize, Debug)]
-pub struct TrmResponse (Vec<WalletScreeningResponse>);
+pub struct TrmRequest(pub Vec<WalletScreeningRequest>);
+#[derive(Serialize,Deserialize, Debug)]
+pub struct TrmResponse (pub Vec<WalletScreeningResponse>);
 #[derive(Serialize,Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct WalletScreeningResponse {

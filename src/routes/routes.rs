@@ -45,6 +45,10 @@ pub fn run<D: 'static + KeyValueDB>(
                 "/wallet_screening",
                 web::post().to(wallet_screening::get_wallet_screening_result::<D>)
             )
+            .route(
+                "/trm_mock",
+                web::post().to(wallet_screening::trm_mock)
+            )
             .app_data(state.clone())
     })
     .listen(listener)?

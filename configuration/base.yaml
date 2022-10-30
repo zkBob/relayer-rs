@@ -20,6 +20,6 @@ web3:
       trm_api_key: api_key  
 trm:
   host: http://127.0.0.1
-  port: 8084
+  port: 8000
   path: /trm_mock
   api_key: api_key
