@@ -1,4 +1,5 @@
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, BigEndian, WriteBytesExt};
+use kvdb::DBKey;
 use libzeropool::{
     fawkes_crypto::ff_uint::{Num, NumRepr, Uint},
     native::{account::Account, cipher, key, note::Note},
@@ -40,27 +41,39 @@ pub struct StateUpdate {
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
-struct DecMemo {
-    index: u64,
-    acc: Option<Account<Fr>>,
+pub struct DecMemo {
+    pub index: u64,
+    pub acc: Option<Account<Fr>>,
     #[serde(rename = "inNotes")]
-    in_notes: Vec<IndexedNote>,
+    pub in_notes: Vec<IndexedNote>,
     #[serde(rename = "outNotes")]
-    out_notes: Vec<IndexedNote>,
+    pub out_notes: Vec<IndexedNote>,
     #[serde(rename = "txHash")]
-    tx_hash: Option<String>,
+    pub tx_hash: Option<String>,
 }
 
 #[derive(Serialize, Default)]
 pub struct ParseResult {
     #[serde(rename = "decryptedMemos")]
-    decrypted_memos: Vec<DecMemo>,
+    pub decrypted_memos: Vec<DecMemo>,
     #[serde(rename = "stateUpdate")]
-    state_update: StateUpdate,
+    pub state_update: StateUpdate,
+}
+
+pub fn index_key(index:u64) -> [u8;8] {
+    let mut data = [0u8; 8];
+    {
+        let mut bytes = &mut data[..];
+        let _ = bytes.write_u64::<BigEndian>(index);
+    }
+    data
+
 }
 pub struct TxParser {
     pub params: PoolParams,
 }
+
+
 
 impl TxParser {
     pub fn new() -> Self {
@@ -162,10 +175,7 @@ impl TxParser {
                         } else {
                             ParseResult {
                                 state_update: StateUpdate {
-                                    new_commitments: vec![(
-                                        index,
-                                        commitment,
-                                    )],
+                                    new_commitments: vec![(index, commitment)],
                                     ..Default::default()
                                 },
                                 ..Default::default()
