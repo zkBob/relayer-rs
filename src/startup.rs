@@ -2,8 +2,10 @@ use crate::{
     configuration::Settings,
     contracts::Pool,
     routes::routes,
-    state::{State, DB}, types::job::Job,
+    state::{State, DB}, types::job::Job, custody::service::CustodyService,
 };
+
+
 
 use actix_web::{dev::Server, web::Data};
 use kvdb::KeyValueDB;
@@ -18,6 +20,7 @@ pub struct Application<D: 'static + KeyValueDB> {
     host: String,
     port: u16,
     pub state: Data<State<D>>,
+    pub custody: Data<CustodyService>
 }
 
 impl<D: 'static + KeyValueDB> Application<D> {
@@ -47,13 +50,14 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let address = format!("{}:{}", host, configuration.application.port);
         let listener = TcpListener::bind(address)?;
         let port = listener.local_addr().unwrap().port();
+        let custody = Data::new(CustodyService::new());
         let server = routes::run(listener, state.clone())?;
-
         Ok(Self {
             server,
             host,
             port,
             state,
+            custody
         })
     }
 

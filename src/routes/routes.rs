@@ -1,4 +1,4 @@
-use std::net::TcpListener;
+use std::{net::TcpListener, sync::Mutex};
 
 use actix_cors::Cors;
 use actix_http::header;
@@ -10,11 +10,12 @@ use actix_web::{
 };
 use kvdb::KeyValueDB;
 
-use crate::{routes::{self, wallet_screening}, state::State};
+use crate::{routes::{self, wallet_screening}, state::State, custody::service::{signup, CustodyService}};
 
 pub fn run<D: 'static + KeyValueDB>(
     listener: TcpListener,
     state: Data<State<D>>,
+    custody: Data<Mutex<CustodyService>>
 ) -> Result<Server, std::io::Error> {
     tracing::info!("starting webserver");
 
@@ -45,7 +46,9 @@ pub fn run<D: 'static + KeyValueDB>(
                 "/wallet_screening",
                 web::post().to(wallet_screening::get_wallet_screening_result::<D>)
             )
+            .route("/signup", web::post().to(signup))
             .app_data(state.clone())
+            .app_data(custody.clone())
     })
     .listen(listener)?
     .run();
