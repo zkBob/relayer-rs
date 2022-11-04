@@ -1,24 +1,17 @@
 use crate::{
     custody::tx_parser::ParseResult,
-    helpers,
     routes::ServiceError,
-    state::{State, DB},
+    state::State,
 };
 use actix_web::{
     web::{Data, Json, Query},
     HttpResponse,
 };
 use kvdb::KeyValueDB;
-use libzeropool::{
-    fawkes_crypto::ff_uint::{Num, Uint},
-    native::boundednum::BoundedNum,
-};
-use libzeropool::{
-    fawkes_crypto::{engines::U256, ff_uint::NumRepr},
-    POOL_PARAMS,
-};
+use libzeropool::fawkes_crypto::ff_uint::Num;
+use libzeropool::fawkes_crypto::ff_uint::NumRepr;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, str::FromStr, sync::Mutex, time::SystemTime};
+use std::{str::FromStr, sync::Mutex, time::SystemTime, fs::{self}};
 use uuid::Uuid;
 
 use libzkbob_rs::{
@@ -82,6 +75,7 @@ pub async fn sync_account<D: KeyValueDB>(
 
     let account_id = Uuid::from_str(&request.id).unwrap();
 
+    relayer_state.sync().await.unwrap();
     custody.sync_account(account_id, relayer_state);
 
     Ok(HttpResponse::Ok().finish())
@@ -98,6 +92,7 @@ pub async fn account_sync_status<D: KeyValueDB>(
 
     let account_id = Uuid::from_str(&request.id).unwrap();
 
+    state.sync().await.unwrap();
     let state = state.finalized.lock().unwrap();
     let relayer_index = state.next_index();
 
@@ -117,6 +112,7 @@ pub async fn list_accounts<D: KeyValueDB>(
         ServiceError::InternalError
     })?;
 
+    state.sync().await.unwrap();
     let finalized = state.finalized.lock().unwrap();
 
     Ok(HttpResponse::Ok().json(custody.list_accounts(finalized.next_index())))
@@ -138,7 +134,27 @@ type RelayerState<D> = Data<State<D>>;
 
 impl CustodyService {
     pub fn new() -> Self {
-        Self { accounts: vec![] }
+        // TODO: env
+        let data_root = "accounts_data";
+        let mut accounts = vec![];
+
+        let paths = fs::read_dir(data_root);
+        if let Ok(paths) = paths {
+            tracing::info!("Loading accounts...");
+            for path in paths {
+                if let Ok(path) = path {
+                    if path.file_type().unwrap().is_dir() {
+                        let account_id = path.file_name();
+                        let account_id = account_id.to_str().unwrap();
+                        tracing::info!("Loading: {}", account_id); 
+                        let account = Account::load(account_id).unwrap();
+                        accounts.push(account);
+                    }   
+                }
+            }
+        }
+        
+        Self { accounts }
     }
 
     pub fn new_account(&mut self, description: String) -> Uuid {
@@ -280,8 +296,9 @@ impl CustodyService {
             let finalized = relayer_state.finalized.lock().unwrap();
             let finalized_index = finalized.next_index();
             tracing::info!(
-                "account {}, finalized index = {} ",
+                "account {}, account_index = {}, finalized index = {} ",
                 account_id,
+                start_index,
                 finalized_index
             );
             // let batch_size = ??? as u64; //TODO: loop
@@ -291,11 +308,10 @@ impl CustodyService {
 
             let indexed_txs: Vec<IndexedTx> = jobs
                 .iter()
-                .enumerate()
                 .map(|item| IndexedTx {
-                    index: item.0 as u64,
-                    memo: (item.1).memo.clone(),
-                    commitment: (item.1).commitment,
+                    index: item.index,
+                    memo: item.memo.clone(),
+                    commitment: item.commitment,
                 })
                 .collect();
 

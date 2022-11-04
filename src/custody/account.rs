@@ -1,5 +1,5 @@
 use kvdb_rocksdb::DatabaseConfig;
-use libzeropool::fawkes_crypto::engines::bn256::{Fr, Fs};
+use libzeropool::fawkes_crypto::engines::bn256::Fs;
 use libzeropool::POOL_PARAMS;
 use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
 use libzkbob_rs::{
@@ -8,17 +8,17 @@ use libzkbob_rs::{
     sparse_array::SparseArray,
 };
 use std::fmt::Display;
-use std::io::Write;
+use std::str::FromStr;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use super::tx_parser::{IndexedTx, StateUpdate, TxParser};
+use super::tx_parser::StateUpdate;
 
 pub enum DataType {
     Tree,
     Transactions,
     History,
-    SecretKey,
+    AccountData,
 }
 
 impl Display for DataType {
@@ -26,7 +26,7 @@ impl Display for DataType {
         match self {
             DataType::Tree => write!(f, "tree"),
             DataType::History => write!(f, "history"),
-            DataType::SecretKey => write!(f, "sk"),
+            DataType::AccountData => write!(f, "account"),
             DataType::Transactions => write!(f, "tx"),
         }
     }
@@ -77,8 +77,8 @@ impl Account {
         let inner = self.inner.lock().unwrap();
         inner.keys.sk
     }
-    pub fn new(description: String) -> Self {
-        
+
+    pub fn new(description: String) -> Self {    
         let id = uuid::Uuid::new_v4();
         let state = State::new(
             MerkleTree::new_native(
@@ -99,8 +99,23 @@ impl Account {
             hex::decode("e0f3b09c27af2986df5c4157dc54e7b43d73748ccf2568e2ea21f2037b887800")
                 .unwrap();
 
-        let mut sk_file = std::fs::File::create(data_file_path(id, DataType::SecretKey)).unwrap();
-        sk_file.write_all(&dummy_sk).unwrap();
+        let account_db = kvdb_rocksdb::Database::open(
+            &DatabaseConfig {
+                columns: 1,
+                ..Default::default()
+            },
+            &data_file_path(id, DataType::AccountData)
+        )
+        .unwrap();
+
+        account_db.write(
+            {
+                let mut tx = account_db.transaction();
+                tx.put(0, "sk".as_bytes(), &dummy_sk);
+                tx.put(0, "description".as_bytes(), description.as_bytes());
+                tx
+            }
+        ).unwrap();
 
         let user_account = NativeUserAccount::from_seed(&dummy_sk, state, POOL_PARAMS.clone());
         Self {
@@ -118,10 +133,49 @@ impl Account {
         }
     }
 
-    // pub fn sync(&mut self, txs: Vec<IndexedTx>) {
-    //     let tx_parser = TxParser::new();
+    pub fn load(account_id: &str) -> Result<Self, String> {
+        let id = uuid::Uuid::from_str(account_id).map_err(|err| err.to_string())?;
+        let state = State::new(
+            MerkleTree::new_native(
+                Default::default(),
+                &data_file_path(id, DataType::Tree),
+                POOL_PARAMS.clone(),
+            )
+            .unwrap(),
+            SparseArray::new_native(
+                &Default::default(),
+                &data_file_path(id, DataType::Transactions),
+            )
+            .unwrap(),
+        );
 
-    //     let sk = self.inner.borrow().keys.sk;
-    //     let parse_result = tx_parser.parse_native_tx(sk, txs);
-    // }
+        let account_db = kvdb_rocksdb::Database::open(
+            &DatabaseConfig {
+                columns: 1,
+                ..Default::default()
+            },
+            &data_file_path(id, DataType::AccountData)
+        )
+        .unwrap();
+
+        let sk = account_db.get(0, "sk".as_bytes()).unwrap().unwrap();
+        let description = String::from_utf8(
+            account_db.get(0, "description".as_bytes()).unwrap().unwrap()
+        ).unwrap();
+        
+        let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
+        Ok(Self {
+            inner: Mutex::new(user_account),
+            id,
+            description,
+            history: kvdb_rocksdb::Database::open(
+                &DatabaseConfig {
+                    columns: 3,
+                    ..Default::default()
+                },
+                &data_file_path(id, DataType::History)
+            )
+            .unwrap(),
+        })
+    }
 }
