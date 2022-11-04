@@ -1000,9 +1000,8 @@ dependencies = [
 
 [[package]]
 name = "fawkes-crypto"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb946fa90e029b7f61f8a121ccd4bc0155041f088c983282a4228d91b6c3ace8"
+version = "4.3.3"
+source = "git+ssh://git@github.com/zkBob/fawkes-crypto.git?branch=multicore-wasm#2abec646403766938d0f6c169ce7b3f04a92669d"
 dependencies = [
  "bit-vec",
  "blake2-rfc_bellman_edition",
@@ -1023,22 +1022,19 @@ dependencies = [
 [[package]]
 name = "fawkes-crypto-bellman_ce"
 version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a67c2c34da49cae5a38cfd872bb35b634f72716ea73c1a9a1426af8ae740981"
+source = "git+ssh://git@github.com/zkBob/phase2-bn254.git?branch=multicore-wasm#f484dbe81e1fd5707de4168a928c5a51e0389add"
 dependencies = [
  "bit-vec",
  "byteorder",
  "cfg-if 0.1.10",
  "fawkes-crypto-pairing_ce",
- "futures 0.1.31",
  "rand 0.4.6",
 ]
 
 [[package]]
 name = "fawkes-crypto-pairing_ce"
 version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6949d6a13fbd939f9dbb1b8c2113f75de69f46f2500ddaa3f23405fa04ce23df"
+source = "git+ssh://git@github.com/zkBob/phase2-bn254.git?branch=multicore-wasm#f484dbe81e1fd5707de4168a928c5a51e0389add"
 dependencies = [
  "byteorder",
  "ff_ce",
@@ -1048,8 +1044,7 @@ dependencies = [
 [[package]]
 name = "fawkes-crypto_derive"
 version = "4.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10cf36473727608ab489ff6b3b208263367ee272b52e34ab45ad82f6e0836ddc"
+source = "git+ssh://git@github.com/zkBob/fawkes-crypto.git?branch=multicore-wasm#2abec646403766938d0f6c169ce7b3f04a92669d"
 dependencies = [
  "proc-macro2 1.0.39",
  "quote 1.0.18",
@@ -1059,8 +1054,7 @@ dependencies = [
 [[package]]
 name = "ff-uint"
 version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecf8faaf3cb97a74ce279dd523fe61d467600e3faee3bee8d4639c29ae4f7a93"
+source = "git+ssh://git@github.com/zkBob/fawkes-crypto.git?branch=multicore-wasm#2abec646403766938d0f6c169ce7b3f04a92669d"
 dependencies = [
  "borsh",
  "byteorder",
@@ -1079,8 +1073,7 @@ dependencies = [
 [[package]]
 name = "ff-uint_derive"
 version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be72cc249edaa75ad09bbe22b596efdc8715acc553f0d9ffdef271cdcea44e86"
+source = "git+ssh://git@github.com/zkBob/fawkes-crypto.git?branch=multicore-wasm#2abec646403766938d0f6c169ce7b3f04a92669d"
 dependencies = [
  "num-bigint 0.3.3",
  "num-integer",
@@ -1205,12 +1198,6 @@ name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
-
-[[package]]
-name = "futures"
-version = "0.1.31"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a471a38ef8ed83cd6e40aa59c1ffe17db6855c18e3604d9c4ed8c08ebc28678"
 
 [[package]]
 name = "futures"
@@ -1709,7 +1696,7 @@ version = "18.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14f7f76aef2d054868398427f6c54943cf3d1caa9a7ec7d0c38d69df97a965eb"
 dependencies = [
- "futures 0.3.21",
+ "futures",
  "futures-executor",
  "futures-util",
  "log",
@@ -1769,7 +1756,7 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb1e98ba343d0b35f9009a8844cd2b87fa3192f7e79033ac05b00aeae0f3b0b5"
 dependencies = [
- "futures 0.3.21",
+ "futures",
  "js-sys",
  "kvdb",
  "kvdb-memorydb",
@@ -1853,8 +1840,7 @@ dependencies = [
 [[package]]
 name = "libzeropool"
 version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ba7b3a406009bbb2b2dc167cb2cff50b6383053984fb2ad82ead79edc341c8b"
+source = "git+https://github.com/zkBob/libzeropool?branch=multicore-wasm#fbc1bd395a4e5d6aaed5084832cc5ded94cf7814"
 dependencies = [
  "chacha20poly1305",
  "convert_case",
@@ -1867,9 +1853,8 @@ dependencies = [
 
 [[package]]
 name = "libzkbob-rs"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3dad8651985d5ac216f326b01e16ece82d5f09d0b08e4ddcfe2bbf7d6566427f"
+version = "0.7.0"
+source = "git+https://github.com/zkBob/libzkbob-rs?branch=custody#6c00255450b4d31b7d6fada053afcdcb65b4809e"
 dependencies = [
  "base64",
  "borsh",
@@ -2976,8 +2961,7 @@ dependencies = [
 [[package]]
 name = "seedbox"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ae30fedd5296a2bda1f186a0cf0f6b459f5d158bffb29a6ed4cde95dc5a2c68"
+source = "git+ssh://git@github.com/zkBob/fawkes-crypto.git?branch=multicore-wasm#2abec646403766938d0f6c169ce7b3f04a92669d"
 dependencies = [
  "rand_chacha 0.3.1",
  "rand_core 0.6.3",
@@ -3179,7 +3163,7 @@ checksum = "41d1c5305e39e09653383c2c7244f2f78b3bcae37cf50c64cb4789c9f5096ec2"
 dependencies = [
  "base64",
  "bytes",
- "futures 0.3.21",
+ "futures",
  "httparse",
  "log",
  "rand 0.8.5",
@@ -3855,7 +3839,7 @@ dependencies = [
  "derive_more",
  "ethabi 16.0.0",
  "ethereum-types 0.12.1",
- "futures 0.3.21",
+ "futures",
  "futures-timer",
  "headers",
  "hex 0.4.3",
@@ -3890,7 +3874,7 @@ dependencies = [
  "derive_more",
  "ethabi 17.1.0",
  "ethereum-types 0.13.1",
- "futures 0.3.21",
+ "futures",
  "futures-timer",
  "headers",
  "hex 0.4.3",
@@ -4038,7 +4022,7 @@ dependencies = [
  "async-trait",
  "base64",
  "deadpool",
- "futures 0.3.21",
+ "futures",
  "futures-timer",
  "http-types",
  "hyper",

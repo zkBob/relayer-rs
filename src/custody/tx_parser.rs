@@ -94,7 +94,7 @@ impl TxParser {
                     memo,
                     commitment,
                 } = tx;
-                let memo = hex::decode(memo).unwrap();
+                // let memo = hex::decode(memo).unwrap();
                 // let commitment = hex::decode(commitment).unwrap();
                 let num_hashes = (&memo[0..4]).read_u32::<LittleEndian>().unwrap();
                 let hashes: Vec<_> = (&memo[4..])
