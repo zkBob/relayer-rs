@@ -11,7 +11,7 @@ use libzeropool::{
     fawkes_crypto::{backend::bellman_groth16::prover::prove, ff_uint::Num},
 };
 use memo_parser::memo::TxType as MemoTxType;
-use std::time::SystemTime;
+use std::{time::SystemTime, fs};
 use uuid::Uuid;
 
 use super::{
@@ -25,9 +25,32 @@ pub struct CustodyService {
     pub accounts: Vec<Account>,
 }
 
+
+// type RelayerState = Data<State<kvdb_rocksdb::Database>>;
+
 impl CustodyService {
     pub fn new() -> Self {
-        Self { accounts: vec![] }
+        // TODO: env
+        let data_root = "accounts_data";
+        let mut accounts = vec![];
+
+        let paths = fs::read_dir(data_root);
+        if let Ok(paths) = paths {
+            tracing::info!("Loading accounts...");
+            for path in paths {
+                if let Ok(path) = path {
+                    if path.file_type().unwrap().is_dir() {
+                        let account_id = path.file_name();
+                        let account_id = account_id.to_str().unwrap();
+                        tracing::info!("Loading: {}", account_id); 
+                        let account = Account::load(account_id).unwrap();
+                        accounts.push(account);
+                    }   
+                }
+            }
+        }
+        
+        Self { accounts }
     }
 
     pub fn new_account(&mut self, description: String) -> Uuid {
@@ -197,8 +220,9 @@ impl CustodyService {
             let finalized = relayer_state.finalized.lock().unwrap();
             let finalized_index = finalized.next_index();
             tracing::info!(
-                "account {}, finalized index = {} ",
+                "account {}, account_index = {}, finalized index = {} ",
                 account_id,
+                start_index,
                 finalized_index
             );
             // let batch_size = ??? as u64; //TODO: loop
@@ -208,11 +232,10 @@ impl CustodyService {
 
             let indexed_txs: Vec<IndexedTx> = jobs
                 .iter()
-                .enumerate()
                 .map(|item| IndexedTx {
-                    index: item.0 as u64,
-                    memo: (item.1).memo.clone(),
-                    commitment: (item.1).commitment,
+                    index: item.index,
+                    memo: item.memo.clone(),
+                    commitment: item.commitment,
                 })
                 .collect();
 
