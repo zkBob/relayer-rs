@@ -1,140 +1,29 @@
 use crate::{
-    custody::tx_parser::ParseResult,
-    helpers,
+    custody::{tx_parser::ParseResult, types::HistoryDbColumn},
     routes::ServiceError,
-    state::{State, DB},
-};
-use actix_web::{
-    web::{Data, Json, Query},
-    HttpResponse,
+    types::transaction_request::{Proof, TransactionRequest},
 };
 use kvdb::KeyValueDB;
+use libzeropool::fawkes_crypto::ff_uint::NumRepr;
 use libzeropool::{
-    fawkes_crypto::ff_uint::{Num, Uint},
-    native::boundednum::BoundedNum,
+    circuit::tx::c_transfer,
+    fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters},
+    fawkes_crypto::{backend::bellman_groth16::prover::prove, ff_uint::Num},
 };
-use libzeropool::{
-    fawkes_crypto::{engines::U256, ff_uint::NumRepr},
-    POOL_PARAMS,
-};
-use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, str::FromStr, sync::Mutex, time::SystemTime};
+use memo_parser::memo::TxType as MemoTxType;
+use std::time::SystemTime;
 use uuid::Uuid;
-
-use libzkbob_rs::{
-    client::TokenAmount,
-    libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait},
-};
-
-pub type PoolParams = PoolBN256;
-pub type Fr = <PoolParams as PoolParamsTrait>::Fr;
-pub type Fs = <PoolParams as PoolParamsTrait>::Fs;
 
 use super::{
     account::Account,
     tx_parser::{self, IndexedTx, TxParser},
+    types::{AccountShortInfo, Fr, RelayerState},
 };
+use libzkbob_rs::client::{TokenAmount, TxOutput, TxType};
 
 pub struct CustodyService {
-    accounts: Vec<Account>,
+    pub accounts: Vec<Account>,
 }
-
-#[derive(Serialize, Deserialize)]
-pub struct SignupRequest {
-    description: String,
-}
-
-#[derive(Deserialize)]
-pub struct AccountInfoRequest {
-    id: String,
-}
-
-#[derive(Serialize)]
-pub struct AccountShortInfo {
-    id: String,
-    description: String,
-    index: String,
-    sync_status: bool,
-}
-pub async fn signup<D: KeyValueDB>(
-    request: Json<SignupRequest>,
-    _state: Data<State<D>>,
-    custody: Data<Mutex<CustodyService>>,
-) -> Result<HttpResponse, ServiceError> {
-    let mut custody = custody.lock().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        ServiceError::InternalError
-    })?;
-    let acc_id = custody.new_account(request.0.description);
-
-    Ok(HttpResponse::Ok().body(acc_id.to_string()))
-}
-
-pub async fn sync_account<D: KeyValueDB>(
-    request: Query<AccountInfoRequest>,
-    relayer_state: Data<State<D>>,
-    custody: Data<Mutex<CustodyService>>,
-) -> Result<HttpResponse, ServiceError> {
-    let custody = custody.lock().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        ServiceError::InternalError
-    })?;
-
-    let account_id = Uuid::from_str(&request.id).unwrap();
-
-    custody.sync_account(account_id, relayer_state);
-
-    Ok(HttpResponse::Ok().finish())
-}
-pub async fn account_sync_status<D: KeyValueDB>(
-    request: Query<AccountInfoRequest>,
-    state: Data<State<D>>,
-    custody: Data<Mutex<CustodyService>>,
-) -> Result<HttpResponse, ServiceError> {
-    let custody = custody.lock().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        ServiceError::InternalError
-    })?;
-
-    let account_id = Uuid::from_str(&request.id).unwrap();
-
-    let state = state.finalized.lock().unwrap();
-    let relayer_index = state.next_index();
-
-    custody
-        .sync_status_inner(account_id, relayer_index)
-        .map_or(Ok(HttpResponse::NotFound().finish()), |res| {
-            Ok(HttpResponse::Ok().json(res))
-        })
-}
-
-pub async fn list_accounts<D: KeyValueDB>(
-    state: Data<State<D>>,
-    custody: Data<Mutex<CustodyService>>,
-) -> Result<HttpResponse, ServiceError> {
-    let custody = custody.lock().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        ServiceError::InternalError
-    })?;
-
-    let finalized = state.finalized.lock().unwrap();
-
-    Ok(HttpResponse::Ok().json(custody.list_accounts(finalized.next_index())))
-}
-
-pub enum HistoryDbColumn {
-    TxHashIndex,
-    NotesIndex,
-}
-
-impl Into<u32> for HistoryDbColumn {
-    fn into(self) -> u32 {
-        self as u32
-    }
-}
-
-// type RelayerState = Data<State<kvdb_rocksdb::Database>>;
-type RelayerState<D> = Data<State<D>>;
 
 impl CustodyService {
     pub fn new() -> Self {
@@ -159,77 +48,105 @@ impl CustodyService {
             })
     }
 
-    /*
-    if (fromAddress) {
-      let deadline = Math.floor(Date.now() / 1000) + PERMIT_DEADLINE_INTERVAL;
-      const holder = ethAddrToBuf(fromAddress);
-      txData = await state.account.createDepositPermittable({
-        amount: (amountGwei + feeGwei).toString(),
-        fee: feeGwei.toString(),
-        deadline: String(deadline),
-        holder
-      });
-
-      // permittable deposit signature should be calculated for the typed data
-      const value = (amountGwei + feeGwei) * state.denominator;
-      const salt = '0x' + toTwosComplementHex(BigInt(txData.public.nullifier), 32);
-      let signature = truncateHexPrefix(await signTypedData(BigInt(deadline), value, salt));
-      if (this.config.network.isSignatureCompact()) {
-        signature = toCompactSignature(signature);
-      }
-
-      // We should check deadline here because the user could introduce great delay
-      if (Math.floor(Date.now() / 1000) > deadline - PERMIT_DEADLINE_THRESHOLD) {
-        throw new TxDepositDeadlineExpiredError(deadline);
-      }
-
-      const startProofDate = Date.now();
-      const txProof = await this.worker.proveTx(txData.public, txData.secret);
-      const proofTime = (Date.now() - startProofDate) / 1000;
-      console.log(`Proof calculation took ${proofTime.toFixed(1)} sec`);
-
-      const txValid = Proof.verify(this.snarkParams.transferVk!, txProof.inputs, txProof.proof);
-      if (!txValid) {
-        throw new TxProofError();
-      }
-
-      let tx = { txType: TxType.BridgeDeposit, memo: txData.memo, proof: txProof, depositSignature: signature };
-      const jobId = await this.sendTransactions(token.relayerUrl, [tx]);
-
-      // Temporary save transaction in the history module (to prevent history delays)
-      const ts = Math.floor(Date.now() / 1000);
-      let rec = HistoryRecord.deposit(fromAddress, amountGwei, feeGwei, ts, "0", true);
-      state.history.keepQueuedTransactions([rec], jobId);
-
-     */
-
-    pub fn deposit(&self, account_id: Uuid, amount: u64, signature: String, holder: String) -> Result<(), ServiceError> {
-        self.accounts
+    pub fn trasfer(
+        &self,
+        account_id: Uuid,
+        amount: u64,
+        recipient_address: String,
+        params: &Parameters<Bn256>,
+    ) -> Result<TransactionRequest, ServiceError> {
+        let account = self
+            .accounts
             .iter()
             .find(|account| account.id == account_id)
-            .map(|account| {
-                let account = account.inner.lock().unwrap();
-                let deadline: u64 = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs()
-                    + 1200;
-                let fee: u64 = 100000000;
+            .unwrap();
+        let account = account.inner.lock().unwrap();
 
-                let deposit_amount: Num<Fr> = Num::from_uint(NumRepr::from(amount + fee)).unwrap();
-                let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
-                let holder = hex::decode(holder).unwrap();
-                let deposit = libzkbob_rs::client::TxType::DepositPermittable(
-                    TokenAmount::new_trimmed(fee),
-                    vec![],
-                    TokenAmount::new_trimmed(deposit_amount),
-                    deadline,
-                    holder,
-                );
-                account.create_tx(deposit , None, None).unwrap();
-                
-            });
-            Ok(())
+        let fee = 100000000;
+        let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
+
+        let tx_output: TxOutput<Fr> = TxOutput {
+            to: recipient_address,
+            amount: TokenAmount::new_trimmed(Num::from_uint(NumRepr::from(amount)).unwrap()),
+        };
+        let transfer = TxType::Transfer(TokenAmount::new_trimmed(fee), vec![], vec![tx_output]);
+
+        let tx = account.create_tx(transfer, None, None).unwrap();
+
+        let circuit = |public, secret| {
+            c_transfer(&public, &secret, &*libzeropool::POOL_PARAMS);
+        };
+
+        let (inputs, snark_proof) = prove(params, &tx.public, &tx.secret, circuit);
+
+        let proof = Proof {
+            inputs,
+            proof: snark_proof,
+        };
+
+        let tx_request = TransactionRequest {
+            uuid: Some(Uuid::new_v4().to_string()),
+            proof,
+            memo: hex::encode(tx.memo),
+            tx_type: MemoTxType::Transfer.to_string(),
+            deposit_signature: None,
+        };
+        Ok(tx_request)
+    }
+
+    pub fn deposit(
+        &self,
+        account_id: Uuid,
+        amount: u64,
+        holder: String,
+        params: &Parameters<Bn256>,
+    ) -> Result<TransactionRequest, ServiceError> {
+        let account = self
+            .accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .unwrap();
+
+        let account = account.inner.lock().unwrap();
+        let deadline: u64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 1200;
+        let fee: u64 = 100000000;
+
+        let deposit_amount: Num<Fr> = Num::from_uint(NumRepr::from(amount + fee)).unwrap();
+        let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
+        let holder = hex::decode(holder).unwrap();
+        let deposit = TxType::DepositPermittable(
+            TokenAmount::new_trimmed(fee),
+            vec![],
+            TokenAmount::new_trimmed(deposit_amount),
+            deadline,
+            holder,
+        );
+        let tx = account.create_tx(deposit, None, None).unwrap();
+
+        let circuit = |public, secret| {
+            c_transfer(&public, &secret, &*libzeropool::POOL_PARAMS);
+        };
+
+        let (inputs, snark_proof) = prove(params, &tx.public, &tx.secret, circuit);
+
+        let proof = Proof {
+            inputs,
+            proof: snark_proof,
+        };
+
+        let tx_request = TransactionRequest {
+            uuid: Some(Uuid::new_v4().to_string()),
+            proof,
+            memo: hex::encode(tx.memo),
+            tx_type: MemoTxType::DepositPermittable.to_string(),
+            deposit_signature: None,
+        };
+
+        Ok(tx_request)
     }
 
     pub fn sync_status_inner(

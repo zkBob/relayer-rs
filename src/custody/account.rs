@@ -1,5 +1,5 @@
 use kvdb_rocksdb::DatabaseConfig;
-use libzeropool::fawkes_crypto::engines::bn256::{Fr, Fs};
+use libzeropool::fawkes_crypto::engines::bn256::Fs;
 use libzeropool::POOL_PARAMS;
 use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
 use libzkbob_rs::{
@@ -12,7 +12,7 @@ use std::io::Write;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use super::tx_parser::{IndexedTx, StateUpdate, TxParser};
+use super::tx_parser::StateUpdate;
 
 pub enum DataType {
     Tree,

@@ -10,12 +10,16 @@ use actix_web::{
 };
 use kvdb::KeyValueDB;
 
-use crate::{routes::{self, wallet_screening}, state::State, custody::service::{signup, account_sync_status, CustodyService, list_accounts, sync_account}};
+use crate::{
+    custody::{routes::{account_sync_status, list_accounts, signup, sync_account}, service::CustodyService},
+    routes::{self, wallet_screening},
+    state::State,
+};
 
 pub fn run<D: 'static + KeyValueDB>(
     listener: TcpListener,
     state: Data<State<D>>,
-    custody: Data<Mutex<CustodyService>>
+    custody: Data<Mutex<CustodyService>>,
 ) -> Result<Server, std::io::Error> {
     tracing::info!("starting webserver");
 
@@ -44,11 +48,11 @@ pub fn run<D: 'static + KeyValueDB>(
             )
             .route(
                 "/wallet_screening",
-                web::post().to(wallet_screening::get_wallet_screening_result::<D>)
+                web::post().to(wallet_screening::get_wallet_screening_result::<D>),
             )
             .route("/signup", web::post().to(signup::<D>))
             .route("/account", web::get().to(account_sync_status::<D>))
-            .route("/accounts", web::get().to(list_accounts::<D>) )
+            .route("/accounts", web::get().to(list_accounts::<D>))
             .route("/sync", web::post().to(sync_account::<D>))
             .app_data(state.clone())
             .app_data(custody.clone())

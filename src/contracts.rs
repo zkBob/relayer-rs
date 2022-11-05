@@ -12,7 +12,6 @@ use web3::{
     Error as Web3Error, Web3,
 };
 
-use actix_web::web::Data;
 
 use crate::{configuration::Web3Settings, state::SyncError};
 

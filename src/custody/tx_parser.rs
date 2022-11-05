@@ -1,5 +1,4 @@
 use byteorder::{LittleEndian, ReadBytesExt, BigEndian, WriteBytesExt};
-use kvdb::DBKey;
 use libzeropool::{
     fawkes_crypto::ff_uint::{Num, NumRepr, Uint},
     native::{account::Account, cipher, key, note::Note},
