@@ -19,6 +19,11 @@ pub async fn sync_account<D: KeyValueDB>(
         ServiceError::InternalError
     })?;
 
+    relayer_state.sync().await.map_err(|_| {
+        tracing::error!("failed to sync state");
+        ServiceError::InternalError
+    })?;
+
     let account_id = Uuid::from_str(&request.id).unwrap();
 
     custody.sync_account(account_id, relayer_state);
@@ -32,6 +37,11 @@ pub async fn account_sync_status<D: KeyValueDB>(
 ) -> Result<HttpResponse, ServiceError> {
     let custody = custody.lock().map_err(|_| {
         tracing::error!("failed to lock custody service");
+        ServiceError::InternalError
+    })?;
+
+    state.sync().await.map_err(|_| {
+        tracing::error!("failed to sync state");
         ServiceError::InternalError
     })?;
 
@@ -67,6 +77,11 @@ pub async fn list_accounts<D: KeyValueDB>(
 ) -> Result<HttpResponse, ServiceError> {
     let custody = custody.lock().map_err(|_| {
         tracing::error!("failed to lock custody service");
+        ServiceError::InternalError
+    })?;
+
+    state.sync().await.map_err(|_| {
+        tracing::error!("failed to sync state");
         ServiceError::InternalError
     })?;
 
