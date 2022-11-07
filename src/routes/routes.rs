@@ -11,7 +11,7 @@ use actix_web::{
 use kvdb::KeyValueDB;
 
 use crate::{
-    custody::{routes::{account_sync_status, list_accounts, signup, sync_account}, service::CustodyService},
+    custody::{routes::{account_sync_status, list_accounts, signup, sync_account, transfer}, service::CustodyService},
     routes::{self, wallet_screening},
     state::State,
 };
@@ -54,6 +54,7 @@ pub fn run<D: 'static + KeyValueDB>(
             .route("/account", web::get().to(account_sync_status::<D>))
             .route("/accounts", web::get().to(list_accounts::<D>))
             .route("/sync", web::post().to(sync_account::<D>))
+            .route("/transfer", web::post().to(transfer::<D>))
             .app_data(state.clone())
             .app_data(custody.clone())
     })

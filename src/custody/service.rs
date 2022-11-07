@@ -19,7 +19,7 @@ use super::{
     tx_parser::{self, IndexedTx, TxParser},
     types::{AccountShortInfo, Fr, RelayerState, TransferRequest}, config::CustodyServiceSettings,
 };
-use libzkbob_rs::client::{TokenAmount, TxOutput, TxType};
+use libzkbob_rs::{client::{TokenAmount, TxOutput, TxType}, proof::prove_tx};
 use std::str::FromStr;
 pub struct CustodyService {
     pub settings: CustodyServiceSettings,
@@ -87,30 +87,31 @@ impl CustodyService {
 
         let tx_output: TxOutput<Fr> = TxOutput {
             to: request.to,
-            amount: TokenAmount::new_trimmed(Num::from_uint(NumRepr::from(request.amount)).unwrap()),
+            amount: TokenAmount::new(Num::from_uint(NumRepr::from(request.amount)).unwrap()),
         };
-        let transfer = TxType::Transfer(TokenAmount::new_trimmed(fee), vec![], vec![tx_output]);
+        let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], vec![tx_output]);
 
         let tx = account.create_tx(transfer, None, None).unwrap();
-
-        let circuit = |public, secret| {
-            c_transfer(&public, &secret, &*libzeropool::POOL_PARAMS);
-        };
-
-        let (inputs, snark_proof) = prove(&self.params, &tx.public, &tx.secret, circuit);
+        let (inputs, proof) = prove_tx(
+            &self.params, 
+            &*libzeropool::POOL_PARAMS, 
+            tx.public, 
+            tx.secret,
+        );
 
         let proof = Proof {
             inputs,
-            proof: snark_proof,
+            proof,
         };
 
         let tx_request = TransactionRequest {
             uuid: Some(Uuid::new_v4().to_string()),
             proof,
             memo: hex::encode(tx.memo),
-            tx_type: MemoTxType::Transfer.to_string(),
+            tx_type: format!("{:0>4}", MemoTxType::Transfer.to_u32()),
             deposit_signature: None,
         };
+        
         Ok(tx_request)
     }
 

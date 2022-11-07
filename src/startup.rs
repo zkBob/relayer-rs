@@ -46,7 +46,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
             settings: Data::new(configuration.clone()),
         });
 
-        let tx_params = configuration.application.get_tree_params();
+        let tx_params = configuration.application.get_tx_params();
         let host = configuration.application.host;
         let address = format!("{}:{}", host, configuration.application.port);
         let listener = TcpListener::bind(address)?;

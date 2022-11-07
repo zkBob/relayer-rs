@@ -111,7 +111,7 @@ pub async fn transfer<D: KeyValueDB>(
 
     let transaction_request = vec![custody.transfer(request)?];
 
-    let relayer_endpoint = "http://localhost:8000/transactions"; //TODO: env
+    let relayer_endpoint = format!("{}/sendTransactions", custody.settings.relayer_url);
 
     let response = reqwest::Client::new()
         .post(relayer_endpoint)
