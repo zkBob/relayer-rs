@@ -17,6 +17,12 @@ pub enum JobStatus {
     Rejected = 4,//This transaction or one of the preceeding tx in the queue were reverted
 }
 
+#[derive(Serialize,Deserialize, Debug)]
+pub struct Response {
+    #[serde(rename = "jobId")]
+    pub job_id: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Job {
     pub id: String,

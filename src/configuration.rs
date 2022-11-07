@@ -63,6 +63,10 @@ impl ApplicationSettings {
         let data = std::fs::read(self.tree.params.clone()).unwrap();
         Parameters::<Bn256>::read(&mut data.as_slice(), true, true).unwrap()
     }
+    pub fn get_tx_params(&self) -> Parameters<Bn256> {
+        let data = std::fs::read(self.tx.params.clone()).unwrap();
+        Parameters::<Bn256>::read(&mut data.as_slice(), true, true).unwrap()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone,Debug)]

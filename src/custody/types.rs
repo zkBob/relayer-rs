@@ -67,3 +67,12 @@ pub struct SignupRequest {
 pub struct AccountInfoRequest {
     pub id: String,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferRequest {
+    pub id: Option<String>,
+    pub account_id: String,
+    pub amount:u64,
+    pub to: String,
+}

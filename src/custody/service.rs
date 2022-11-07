@@ -17,19 +17,20 @@ use uuid::Uuid;
 use super::{
     account::Account,
     tx_parser::{self, IndexedTx, TxParser},
-    types::{AccountShortInfo, Fr, RelayerState},
+    types::{AccountShortInfo, Fr, RelayerState, TransferRequest},
 };
 use libzkbob_rs::client::{TokenAmount, TxOutput, TxType};
-
+use std::str::FromStr;
 pub struct CustodyService {
     pub accounts: Vec<Account>,
+    pub params: Parameters<Bn256>
 }
 
 
 // type RelayerState = Data<State<kvdb_rocksdb::Database>>;
 
 impl CustodyService {
-    pub fn new() -> Self {
+    pub fn new(params: Parameters<Bn256>) -> Self {
         // TODO: env
         let data_root = "accounts_data";
         let mut accounts = vec![];
@@ -50,7 +51,7 @@ impl CustodyService {
             }
         }
         
-        Self { accounts }
+        Self { accounts , params }
     }
 
     pub fn new_account(&mut self, description: String) -> Uuid {
@@ -71,13 +72,12 @@ impl CustodyService {
             })
     }
 
-    pub fn trasfer(
+    pub fn transfer(
         &self,
-        account_id: Uuid,
-        amount: u64,
-        recipient_address: String,
-        params: &Parameters<Bn256>,
+        request: TransferRequest
     ) -> Result<TransactionRequest, ServiceError> {
+
+        let account_id = Uuid::from_str(&request.account_id).unwrap();
         let account = self
             .accounts
             .iter()
@@ -89,8 +89,8 @@ impl CustodyService {
         let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
 
         let tx_output: TxOutput<Fr> = TxOutput {
-            to: recipient_address,
-            amount: TokenAmount::new_trimmed(Num::from_uint(NumRepr::from(amount)).unwrap()),
+            to: request.to,
+            amount: TokenAmount::new_trimmed(Num::from_uint(NumRepr::from(request.amount)).unwrap()),
         };
         let transfer = TxType::Transfer(TokenAmount::new_trimmed(fee), vec![], vec![tx_output]);
 
@@ -100,7 +100,7 @@ impl CustodyService {
             c_transfer(&public, &secret, &*libzeropool::POOL_PARAMS);
         };
 
-        let (inputs, snark_proof) = prove(params, &tx.public, &tx.secret, circuit);
+        let (inputs, snark_proof) = prove(&self.params, &tx.public, &tx.secret, circuit);
 
         let proof = Proof {
             inputs,

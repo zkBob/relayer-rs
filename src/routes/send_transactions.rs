@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::{
     state::State,
     types::{
-        job::Job,
+        job::{Job, Response},
         transaction_request::TransactionRequest,
     },
 };
@@ -16,11 +16,6 @@ use crate::{
 use super::ServiceError;
 extern crate hex;
 
-#[derive(Serialize)]
-pub struct Response {
-    #[serde(rename = "jobId")]
-    job_id: String,
-}
 
 pub async fn query() -> Result<HttpResponse, ServiceError> {
     Ok(HttpResponse::Ok().finish())
