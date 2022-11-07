@@ -1,11 +1,11 @@
 use crate::{
     configuration::Settings,
     contracts::Pool,
+    custody::service::CustodyService,
     routes::routes,
-    state::{State, DB}, types::job::Job, custody::service::CustodyService,
+    state::{State, DB},
+    types::job::Job,
 };
-
-
 
 use actix_web::{dev::Server, web::Data};
 use kvdb::KeyValueDB;
@@ -43,7 +43,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
             pool,
             jobs,
             sender: Data::new(sender),
-            settings: Data::new(configuration.clone())
+            settings: Data::new(configuration.clone()),
         });
 
         let tx_params = configuration.application.get_tree_params();
@@ -51,8 +51,11 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let address = format!("{}:{}", host, configuration.application.port);
         let listener = TcpListener::bind(address)?;
         let port = listener.local_addr().unwrap().port();
-        let custody = Data::new(Mutex::new(CustodyService::new(tx_params)));
-        let server = routes::run(listener, state.clone(),custody)?;
+        let custody = Data::new(Mutex::new(CustodyService::new(
+            tx_params,
+            configuration.custody,
+        )));
+        let server = routes::run(listener, state.clone(), custody)?;
         // let custody = custody.clone();
         Ok(Self {
             server,

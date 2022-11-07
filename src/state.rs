@@ -21,7 +21,7 @@ use uuid::Uuid;
 use web3::types::BlockNumber;
 
 use crate::{
-    configuration::{Web3Settings, Settings}, contracts::Pool,
+    configuration::Settings, contracts::Pool,
     helpers, types::job::{Job, JobStatus},
 };
 

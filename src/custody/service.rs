@@ -17,22 +17,19 @@ use uuid::Uuid;
 use super::{
     account::Account,
     tx_parser::{self, IndexedTx, TxParser},
-    types::{AccountShortInfo, Fr, RelayerState, TransferRequest},
+    types::{AccountShortInfo, Fr, RelayerState, TransferRequest}, config::CustodyServiceSettings,
 };
 use libzkbob_rs::client::{TokenAmount, TxOutput, TxType};
 use std::str::FromStr;
 pub struct CustodyService {
+    pub settings: CustodyServiceSettings,
     pub accounts: Vec<Account>,
     pub params: Parameters<Bn256>
 }
 
-
-// type RelayerState = Data<State<kvdb_rocksdb::Database>>;
-
 impl CustodyService {
-    pub fn new(params: Parameters<Bn256>) -> Self {
-        // TODO: env
-        let data_root = "accounts_data";
+    pub fn new(params: Parameters<Bn256>,settings: CustodyServiceSettings) -> Self {
+        let data_root = &settings.accounts_path;
         let mut accounts = vec![];
 
         let paths = fs::read_dir(data_root);
@@ -44,18 +41,18 @@ impl CustodyService {
                         let account_id = path.file_name();
                         let account_id = account_id.to_str().unwrap();
                         tracing::info!("Loading: {}", account_id); 
-                        let account = Account::load(account_id).unwrap();
+                        let account = Account::load(&settings.accounts_path, account_id).unwrap();
                         accounts.push(account);
                     }   
                 }
             }
         }
         
-        Self { accounts , params }
+        Self { accounts, settings, params }
     }
 
     pub fn new_account(&mut self, description: String) -> Uuid {
-        let account = Account::new(description);
+        let account = Account::new(&self.settings.accounts_path, description);
         let id = account.id;
         self.accounts.push(account);
         tracing::info!("created a new account: {}", id);

@@ -32,10 +32,8 @@ impl Display for DataType {
     }
 }
 
-pub fn data_file_path(account_id: Uuid, data_type: DataType) -> String {
-    let data_root = "accounts_data";
-
-    format!("{}/{}/{}", data_root, account_id.as_hyphenated(), data_type)
+pub fn data_file_path(base_path: &str, account_id: Uuid, data_type: DataType) -> String {
+    format!("{}/{}/{}", base_path, account_id.as_hyphenated(), data_type)
 }
 pub struct Account {
     pub inner: Mutex<NativeUserAccount<kvdb_rocksdb::Database, PoolBN256>>,
@@ -78,18 +76,18 @@ impl Account {
         inner.keys.sk
     }
 
-    pub fn new(description: String) -> Self {    
+    pub fn new(base_path: &str, description: String) -> Self {    
         let id = uuid::Uuid::new_v4();
         let state = State::new(
             MerkleTree::new_native(
                 Default::default(),
-                &data_file_path(id, DataType::Tree),
+                &data_file_path(base_path, id, DataType::Tree),
                 POOL_PARAMS.clone(),
             )
             .unwrap(),
             SparseArray::new_native(
                 &Default::default(),
-                &data_file_path(id, DataType::Transactions),
+                &data_file_path(base_path, id, DataType::Transactions),
             )
             .unwrap(),
         );
@@ -104,7 +102,7 @@ impl Account {
                 columns: 1,
                 ..Default::default()
             },
-            &data_file_path(id, DataType::AccountData)
+            &data_file_path(base_path, id, DataType::AccountData)
         )
         .unwrap();
 
@@ -127,24 +125,24 @@ impl Account {
                     columns: 3,
                     ..Default::default()
                 },
-                &data_file_path(id, DataType::History)
+                &data_file_path(base_path, id, DataType::History)
             )
             .unwrap(),
         }
     }
 
-    pub fn load(account_id: &str) -> Result<Self, String> {
+    pub fn load(base_path: &str, account_id: &str) -> Result<Self, String> {
         let id = uuid::Uuid::from_str(account_id).map_err(|err| err.to_string())?;
         let state = State::new(
             MerkleTree::new_native(
                 Default::default(),
-                &data_file_path(id, DataType::Tree),
+                &data_file_path(base_path, id, DataType::Tree),
                 POOL_PARAMS.clone(),
             )
             .unwrap(),
             SparseArray::new_native(
                 &Default::default(),
-                &data_file_path(id, DataType::Transactions),
+                &data_file_path(base_path, id, DataType::Transactions),
             )
             .unwrap(),
         );
@@ -154,7 +152,7 @@ impl Account {
                 columns: 1,
                 ..Default::default()
             },
-            &data_file_path(id, DataType::AccountData)
+            &data_file_path(base_path, id, DataType::AccountData)
         )
         .unwrap();
 
@@ -173,7 +171,7 @@ impl Account {
                     columns: 3,
                     ..Default::default()
                 },
-                &data_file_path(id, DataType::History)
+                &data_file_path(base_path, id, DataType::History)
             )
             .unwrap(),
         })

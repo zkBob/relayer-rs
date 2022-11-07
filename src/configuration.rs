@@ -5,7 +5,8 @@ use serde_aux::field_attributes::deserialize_number_from_string;
 pub struct Settings {
     pub application: ApplicationSettings,
     pub web3: Web3Settings,
-    pub trm: TRMSettings
+    pub trm: TRMSettings,
+    pub custody: CustodyServiceSettings,
 }
 
 #[derive(Serialize, Deserialize, Clone,Debug)]
@@ -33,7 +34,6 @@ pub struct Web3Settings {
     #[serde(skip_serializing)]
     pub credentials: Credentials,
     pub scheduler_interval_sec: u64,
-    // pub trm_endpoint: String,
 }
 
 #[derive(Serialize,Deserialize,Clone,Debug)]
@@ -46,6 +46,8 @@ pub struct TRMSettings {
 }
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier, Parameters};
+
+use crate::custody::config::CustodyServiceSettings;
 
 impl ApplicationSettings {
     pub fn get_tx_vk(&self) -> Result<verifier::VK<Bn256>, std::io::Error> {
