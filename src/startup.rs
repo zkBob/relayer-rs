@@ -12,7 +12,7 @@ use kvdb::KeyValueDB;
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier::VK};
 
-use std::{net::TcpListener, sync::Mutex};
+use std::{net::TcpListener, sync::RwLock};
 use tokio::sync::mpsc::Sender;
 
 pub struct Application<D: 'static + KeyValueDB> {
@@ -51,7 +51,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let address = format!("{}:{}", host, configuration.application.port);
         let listener = TcpListener::bind(address)?;
         let port = listener.local_addr().unwrap().port();
-        let custody = Data::new(Mutex::new(CustodyService::new(
+        let custody = Data::new(RwLock::new(CustodyService::new(
             tx_params,
             configuration.custody,
         )));

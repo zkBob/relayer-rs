@@ -3,7 +3,7 @@ use actix_web::{
     HttpResponse,
 };
 use kvdb::KeyValueDB;
-use std::{str::FromStr, sync::Mutex};
+use std::{str::FromStr, sync::RwLock};
 use uuid::Uuid;
 
 use crate::{routes::ServiceError, state::State, types::job::Response};
@@ -14,13 +14,14 @@ use super::{
 };
 
 // pub type Custody = Data<CustodyService>;
-pub type Custody = Data<Mutex<CustodyService>>;
+pub type Custody = Data<RwLock<CustodyService>>;
+
 pub async fn sync_account<D: KeyValueDB>(
     request: Query<AccountInfoRequest>,
     relayer_state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, ServiceError> {
-    let custody = custody.lock().map_err(|_| {
+    let custody = custody.read().map_err(|_| {
         tracing::error!("failed to lock custody service");
         ServiceError::InternalError
     })?;
@@ -41,7 +42,7 @@ pub async fn account_sync_status<D: KeyValueDB>(
     state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, ServiceError> {
-    let custody = custody.lock().map_err(|_| {
+    let custody = custody.read().map_err(|_| {
         tracing::error!("failed to lock custody service");
         ServiceError::InternalError
     })?;
@@ -68,7 +69,7 @@ pub async fn signup<D: KeyValueDB>(
     _state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, ServiceError> {
-    let mut custody = custody.lock().map_err(|_| {
+    let mut custody = custody.write().map_err(|_| {
         tracing::error!("failed to lock custody service");
         ServiceError::InternalError
     })?;
@@ -81,7 +82,7 @@ pub async fn list_accounts<D: KeyValueDB>(
     state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, ServiceError> {
-    let custody = custody.lock().map_err(|_| {
+    let custody = custody.read().map_err(|_| {
         tracing::error!("failed to lock custody service");
         ServiceError::InternalError
     })?;
@@ -103,7 +104,7 @@ pub async fn transfer<D: KeyValueDB>(
 ) -> Result<HttpResponse, ServiceError> {
     let request: TransferRequest = request.0.into();
     let account_id = Uuid::from_str(&request.account_id).unwrap();
-    let custody = custody.lock().map_err(|_| {
+    let custody = custody.read().map_err(|_| {
         tracing::error!("failed to lock custody service");
         ServiceError::InternalError
     })?;

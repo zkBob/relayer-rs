@@ -64,7 +64,7 @@ impl CustodyService {
             .iter()
             .find(|account| account.id == account_id)
             .map(|account| {
-                let account = account.inner.lock().unwrap();
+                let account = account.inner.read().unwrap();
                 account.generate_address()
             })
     }
@@ -79,8 +79,8 @@ impl CustodyService {
             .accounts
             .iter()
             .find(|account| account.id == account_id)
-            .unwrap();
-        let account = account.inner.lock().unwrap();
+            .ok_or(ServiceError::BadRequest(String::from("account with such id doesn't exist")))?;
+        let account = account.inner.read().unwrap();
 
         let fee = 100000000;
         let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
@@ -128,7 +128,7 @@ impl CustodyService {
             .find(|account| account.id == account_id)
             .unwrap();
 
-        let account = account.inner.lock().unwrap();
+        let account = account.inner.read().unwrap();
         let deadline: u64 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -179,12 +179,11 @@ impl CustodyService {
             .iter()
             .find(|account| account.id == account_id)
             .map(|account| {
-                let account_state = account.inner.lock().unwrap();
                 AccountShortInfo {
                     id: account_id.to_string(),
                     description: account.description.clone(),
-                    index: account_state.state.tree.next_index().to_string(),
-                    sync_status: relayer_index == account_state.state.tree.next_index(),
+                    index: account.next_index().to_string(),
+                    sync_status: relayer_index == account.next_index(),
                 }
             })
     }
@@ -194,12 +193,11 @@ impl CustodyService {
             .iter()
             // .find(|account| account.id == account_id)
             .map(|account| {
-                let account_state = account.inner.lock().unwrap();
                 AccountShortInfo {
                     id: account.id.to_string(),
                     description: account.description.clone(),
-                    index: account_state.state.tree.next_index().to_string(),
-                    sync_status: relayer_index == account_state.state.tree.next_index(),
+                    index: account.next_index().to_string(),
+                    sync_status: relayer_index == account.next_index(),
                 }
             })
             .collect()

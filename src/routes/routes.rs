@@ -1,4 +1,4 @@
-use std::{net::TcpListener, sync::Mutex};
+use std::{net::TcpListener, sync::RwLock};
 
 use actix_cors::Cors;
 use actix_http::header;
@@ -19,7 +19,7 @@ use crate::{
 pub fn run<D: 'static + KeyValueDB>(
     listener: TcpListener,
     state: Data<State<D>>,
-    custody: Data<Mutex<CustodyService>>,
+    custody: Data<RwLock<CustodyService>>,
 ) -> Result<Server, std::io::Error> {
     tracing::info!("starting webserver");
 

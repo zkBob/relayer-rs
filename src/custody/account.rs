@@ -9,7 +9,7 @@ use libzkbob_rs::{
 };
 use std::fmt::Display;
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::RwLock;
 use uuid::Uuid;
 
 use super::tx_parser::StateUpdate;
@@ -36,7 +36,7 @@ pub fn data_file_path(base_path: &str, account_id: Uuid, data_type: DataType) ->
     format!("{}/{}/{}", base_path, account_id.as_hyphenated(), data_type)
 }
 pub struct Account {
-    pub inner: Mutex<NativeUserAccount<kvdb_rocksdb::Database, PoolBN256>>,
+    pub inner: RwLock<NativeUserAccount<kvdb_rocksdb::Database, PoolBN256>>,
     pub id: Uuid,
     pub description: String,
     pub history: kvdb_rocksdb::Database,
@@ -44,7 +44,7 @@ pub struct Account {
 
 impl Account {
     pub fn update_state(&self, state_update: StateUpdate) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.write().unwrap();
         if !state_update.new_leafs.is_empty() || !state_update.new_commitments.is_empty() {
             inner
                 .state
@@ -67,12 +67,12 @@ impl Account {
     }
 
     pub fn next_index(&self) -> u64 {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.read().unwrap();
         inner.state.tree.next_index()
     }
 
     pub fn sk(&self) -> Num<Fs> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.read().unwrap();
         inner.keys.sk
     }
 
@@ -117,7 +117,7 @@ impl Account {
 
         let user_account = NativeUserAccount::from_seed(&dummy_sk, state, POOL_PARAMS.clone());
         Self {
-            inner: Mutex::new(user_account),
+            inner: RwLock::new(user_account),
             id,
             description,
             history: kvdb_rocksdb::Database::open(
@@ -163,7 +163,7 @@ impl Account {
         
         let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
         Ok(Self {
-            inner: Mutex::new(user_account),
+            inner: RwLock::new(user_account),
             id,
             description,
             history: kvdb_rocksdb::Database::open(
