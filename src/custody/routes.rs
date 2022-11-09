@@ -58,7 +58,7 @@ pub async fn account_sync_status<D: KeyValueDB>(
     let relayer_index = state.next_index();
 
     custody
-        .sync_status_inner(account_id, relayer_index)
+        .account_info(account_id, relayer_index)
         .map_or(Ok(HttpResponse::NotFound().finish()), |res| {
             Ok(HttpResponse::Ok().json(res))
         })

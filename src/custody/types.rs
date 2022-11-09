@@ -23,6 +23,18 @@ pub struct AccountShortInfo {
     pub index: String,
     pub sync_status: bool,
 }
+
+#[derive(Serialize)]
+pub struct AccountDetailedInfo {
+    pub id: String,
+    pub description: String,
+    pub index: String,
+    pub sync_status: bool,
+    pub total_balance: String,
+    pub account_balance: String,
+    pub note_balance: String, 
+}
+
 pub enum HistoryDbColumn {
     TxHashIndex,
     NotesIndex,

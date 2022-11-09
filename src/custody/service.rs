@@ -17,7 +17,7 @@ use uuid::Uuid;
 use super::{
     account::Account,
     tx_parser::{self, IndexedTx, TxParser},
-    types::{AccountShortInfo, Fr, RelayerState, TransferRequest}, config::CustodyServiceSettings,
+    types::{AccountShortInfo, Fr, RelayerState, TransferRequest, AccountDetailedInfo}, config::CustodyServiceSettings,
 };
 use libzkbob_rs::{client::{TokenAmount, TxOutput, TxType}, proof::prove_tx};
 use std::str::FromStr;
@@ -170,20 +170,24 @@ impl CustodyService {
         Ok(tx_request)
     }
 
-    pub fn sync_status_inner(
+    pub fn account_info(
         &self,
         account_id: Uuid,
         relayer_index: u64,
-    ) -> Option<AccountShortInfo> {
+    ) -> Option<AccountDetailedInfo> {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
             .map(|account| {
-                AccountShortInfo {
+                let inner = account.inner.read().unwrap();
+                AccountDetailedInfo {
                     id: account_id.to_string(),
                     description: account.description.clone(),
                     index: account.next_index().to_string(),
                     sync_status: relayer_index == account.next_index(),
+                    total_balance: inner.state.total_balance().to_string(),
+                    account_balance: inner.state.account_balance().to_string(),
+                    note_balance: inner.state.note_balance().to_string(),
                 }
             })
     }
