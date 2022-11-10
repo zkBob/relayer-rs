@@ -10,7 +10,7 @@ use crate::{routes::ServiceError, state::State, types::job::Response};
 
 use super::{
     service::CustodyService,
-    types::{AccountInfoRequest, SignupRequest, TransferRequest},
+    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse},
 };
 
 // pub type Custody = Data<CustodyService>;
@@ -37,7 +37,7 @@ pub async fn sync_account<D: KeyValueDB>(
 
     Ok(HttpResponse::Ok().finish())
 }
-pub async fn account_sync_status<D: KeyValueDB>(
+pub async fn account_info<D: KeyValueDB>(
     request: Query<AccountInfoRequest>,
     state: Data<State<D>>,
     custody: Custody,
@@ -141,4 +141,28 @@ pub async fn transfer<D: KeyValueDB>(
     tracing::info!("relayer returned the job id: {:#?}", response.job_id );
 
     Ok(HttpResponse::Ok().json(response))
+}
+
+pub async fn generate_shielded_address<D: KeyValueDB>(
+    request: Query<AccountInfoRequest>,
+    custody: Custody,
+) -> Result<HttpResponse, ServiceError> {
+    let custody = custody.read().map_err(|_| {
+        tracing::error!("failed to lock custody service");
+        ServiceError::InternalError
+    })?;
+
+    let account_id = Uuid::from_str(&request.id).map_err(|err| {
+        tracing::error!("failed to parse account_id");
+        ServiceError::BadRequest(err.to_string())
+    })?;
+
+    let account = custody.account(account_id)?;
+    let account = account.inner.read().map_err(|_| ServiceError::InternalError)?;
+    let address = account.generate_address();
+
+    Ok(HttpResponse::Ok().json(GenerateAddressResponse{
+        success: true,
+        address,
+    }))
 }

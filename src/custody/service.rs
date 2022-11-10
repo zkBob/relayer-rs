@@ -270,4 +270,11 @@ impl CustodyService {
         }
         ()
     }
+
+    pub fn account(&self, account_id: Uuid) -> Result<&Account, ServiceError> {
+        self.accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .ok_or(ServiceError::BadRequest(String::from("account with such id doesn't exist")))
+    }
 }

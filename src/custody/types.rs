@@ -88,3 +88,10 @@ pub struct TransferRequest {
     pub amount:u64,
     pub to: String,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateAddressResponse {
+    pub success: bool,
+    pub address: String,
+}
