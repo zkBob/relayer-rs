@@ -1,18 +1,27 @@
+use ethabi::ethereum_types::H256;
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
 use libzeropool::POOL_PARAMS;
 use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
+use libzkbob_rs::address;
 use libzkbob_rs::{
     client::{state::State, UserAccount as NativeUserAccount},
     merkle::MerkleTree,
     sparse_array::SparseArray,
 };
+use memo_parser::memo::TxType;
+use memo_parser::memoparser;
+use web3::futures::future::join_all;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::RwLock;
 use uuid::Uuid;
 
-use super::tx_parser::StateUpdate;
+use crate::contracts::Pool;
+use crate::custody::types::{HistoryTx, PoolParams};
+
+use super::tx_parser::{StateUpdate, DecMemo};
+use super::types::{HistoryRecord, HistoryDbColumn, HistoryTxType};
 
 pub enum DataType {
     Tree,
@@ -74,6 +83,53 @@ impl Account {
     pub fn sk(&self) -> Num<Fs> {
         let inner = self.inner.read().unwrap();
         inner.keys.sk
+    }
+
+    pub async fn history(&self, pool: &Pool) -> Vec<HistoryTx> {
+        let mut history = vec![];
+        for (_, value) in self.history.iter(HistoryDbColumn::NotesIndex.into()) {
+            let tx: HistoryRecord = serde_json::from_slice(&value).unwrap();
+            let calldata = memoparser::parse_calldata(&tx.calldata, None).unwrap();
+            let dec_memo = tx.dec_memo;
+            let tx_type = TxType::from_u32(calldata.tx_type);
+            
+            let (tx_type, amount, to) = match tx_type {
+                TxType::Deposit => {
+                    (HistoryTxType::Deposit, calldata.token_amount.to_string(), None)
+                },
+                TxType::DepositPermittable => {
+                    (HistoryTxType::Deposit, calldata.token_amount.to_string(), None)
+                },
+                TxType::Transfer => {
+                    if dec_memo.in_notes.len() > 0 {
+                        // TODO: multitransfer
+                        let note = &dec_memo.in_notes[0].note;
+                        let amount = note.b.to_num();
+                        let address = address::format_address::<PoolParams>(note.d, note.p_d);
+                        (HistoryTxType::TransferIn, amount.to_string(), Some(address))
+                    } else {
+                        // TODO: multitransfer
+                        let note = &dec_memo.out_notes[0].note;
+                        let amount = note.b.to_num();
+                        let address = address::format_address::<PoolParams>(note.d, note.p_d);
+                        (HistoryTxType::TransferOut, amount.to_string(), Some(address))
+                    }
+                },
+                TxType::Withdrawal => {
+                    (HistoryTxType::Withdrawal, (-calldata.token_amount).to_string(), None)
+                }
+            };
+            
+            history.push(HistoryTx {
+                tx_hash: format!("{:#x}", tx.tx_hash),
+                tx_index: calldata.tx_index.to_string(),
+                amount,
+                timestamp: String::new(),
+                tx_type,
+                to,
+            })
+        }
+        history
     }
 
     pub fn new(base_path: &str, description: String) -> Self {    

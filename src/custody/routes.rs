@@ -10,7 +10,7 @@ use crate::{routes::ServiceError, state::State, types::job::Response};
 
 use super::{
     service::CustodyService,
-    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SyncResponse, SignupResponse, ListAccountsResponse},
+    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SyncResponse, SignupResponse, ListAccountsResponse, HistoryResponse},
 };
 
 pub type Custody = Data<RwLock<CustodyService>>;
@@ -184,5 +184,29 @@ pub async fn generate_shielded_address<D: KeyValueDB>(
     Ok(HttpResponse::Ok().json(GenerateAddressResponse{
         success: true,
         address,
+    }))
+}
+
+pub async fn history<D: KeyValueDB>(
+    request: Query<AccountInfoRequest>,
+    state: Data<State<D>>,
+    custody: Custody,
+) -> Result<HttpResponse, ServiceError> {
+    let custody = custody.read().map_err(|_| {
+        tracing::error!("failed to lock custody service");
+        ServiceError::InternalError
+    })?;
+
+    let account_id = Uuid::from_str(&request.id).map_err(|err| {
+        tracing::error!("failed to parse account id: {}", err);
+        ServiceError::BadRequest(String::from("failed to parse account id"))
+    })?;
+
+    let account = custody.account(account_id)?;
+    let txs = account.history(&state.pool).await;
+
+    Ok(HttpResponse::Ok().json(HistoryResponse{
+        success: true,
+        txs 
     }))
 }

@@ -3,6 +3,7 @@ use actix_web::{
     web::Data,
 };
 
+use ethabi::ethereum_types::H256;
 use libzeropool::{
     constants,
     fawkes_crypto::{
@@ -12,9 +13,12 @@ use libzeropool::{
     native::tx::{TransferPub, TransferSec},
 };
 
+use memo_parser::memoparser::Calldata;
 use serde::{Deserialize, Serialize};
 
 use libzkbob_rs::libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait};
+
+use super::tx_parser::DecMemo;
 
 #[derive(Serialize)]
 pub struct AccountShortInfo {
@@ -115,5 +119,39 @@ pub struct SignupResponse {
 pub struct ListAccountsResponse {
     pub success: bool,
     pub accounts: Vec<AccountShortInfo>,
+}
+
+#[derive(Serialize)]
+pub enum HistoryTxType {
+    Deposit,
+    Withdrawal,
+    TransferIn,
+    TransferOut,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryTx {
+    pub tx_type: HistoryTxType,
+    pub tx_hash: String,
+    pub tx_index: String,
+    pub timestamp: String,
+    pub amount: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct HistoryRecord {
+    pub dec_memo: DecMemo,
+    pub tx_hash: H256,
+    pub calldata: Vec<u8>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryResponse {
+    pub success: bool,
+    pub txs: Vec<HistoryTx>
 }
 
