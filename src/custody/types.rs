@@ -3,7 +3,7 @@ use actix_web::{
     web::Data,
 };
 
-use ethabi::ethereum_types::H256;
+use ethabi::ethereum_types::{H256, U64};
 use libzeropool::{
     constants,
     fawkes_crypto::{
@@ -13,7 +13,6 @@ use libzeropool::{
     native::tx::{TransferPub, TransferSec},
 };
 
-use memo_parser::memoparser::Calldata;
 use serde::{Deserialize, Serialize};
 
 use libzkbob_rs::libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait};
@@ -127,6 +126,7 @@ pub enum HistoryTxType {
     Withdrawal,
     TransferIn,
     TransferOut,
+    TransferLoopback,
 }
 
 #[derive(Serialize)]
@@ -146,6 +146,7 @@ pub struct HistoryRecord {
     pub dec_memo: DecMemo,
     pub tx_hash: H256,
     pub calldata: Vec<u8>,
+    pub block_num: U64,
 }
 
 #[derive(Serialize)]

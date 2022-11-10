@@ -1,5 +1,5 @@
 use crate::{
-    custody::{tx_parser::{ParseResult, DecMemo}, types::{HistoryDbColumn, HistoryRecord}},
+    custody::{tx_parser::ParseResult, types::{HistoryDbColumn, HistoryRecord}},
     routes::ServiceError,
     types::transaction_request::{Proof, TransactionRequest},
 };
@@ -263,7 +263,8 @@ impl CustodyService {
                 let record = HistoryRecord {
                     dec_memo: memo.clone(),
                     tx_hash: tx.hash,
-                    calldata: tx.input.0.clone()
+                    calldata: tx.input.0.clone(),
+                    block_num: tx.block_number.unwrap()
                 };
 
                 batch.put_vec(

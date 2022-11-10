@@ -1,4 +1,3 @@
-use ethabi::ethereum_types::H256;
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
 use libzeropool::POOL_PARAMS;
@@ -11,7 +10,6 @@ use libzkbob_rs::{
 };
 use memo_parser::memo::TxType;
 use memo_parser::memoparser;
-use web3::futures::future::join_all;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::RwLock;
@@ -20,7 +18,7 @@ use uuid::Uuid;
 use crate::contracts::Pool;
 use crate::custody::types::{HistoryTx, PoolParams};
 
-use super::tx_parser::{StateUpdate, DecMemo};
+use super::tx_parser::StateUpdate;
 use super::types::{HistoryRecord, HistoryDbColumn, HistoryTxType};
 
 pub enum DataType {
@@ -102,11 +100,19 @@ impl Account {
                 },
                 TxType::Transfer => {
                     if dec_memo.in_notes.len() > 0 {
-                        // TODO: multitransfer
-                        let note = &dec_memo.in_notes[0].note;
-                        let amount = note.b.to_num();
-                        let address = address::format_address::<PoolParams>(note.d, note.p_d);
-                        (HistoryTxType::TransferIn, amount.to_string(), Some(address))
+                        if dec_memo.out_notes.len() > 0 {
+                            // TODO: multitransfer
+                            let note = &dec_memo.out_notes[0].note;
+                            let amount = note.b.to_num();
+                            let address = address::format_address::<PoolParams>(note.d, note.p_d);
+                            (HistoryTxType::TransferLoopback, amount.to_string(), Some(address))
+                        } else {
+                            // TODO: multitransfer
+                            let note = &dec_memo.in_notes[0].note;
+                            let amount = note.b.to_num();
+                            let address = address::format_address::<PoolParams>(note.d, note.p_d);
+                            (HistoryTxType::TransferIn, amount.to_string(), Some(address))
+                        }
                     } else {
                         // TODO: multitransfer
                         let note = &dec_memo.out_notes[0].note;
@@ -116,15 +122,16 @@ impl Account {
                     }
                 },
                 TxType::Withdrawal => {
-                    (HistoryTxType::Withdrawal, (-calldata.token_amount).to_string(), None)
+                    (HistoryTxType::Withdrawal, (-(calldata.memo.fee as i128 + calldata.token_amount)).to_string(), None)
                 }
             };
             
+            let timestamp = pool.block_timestamp(tx.block_num).await.unwrap();
             history.push(HistoryTx {
                 tx_hash: format!("{:#x}", tx.tx_hash),
                 tx_index: calldata.tx_index.to_string(),
                 amount,
-                timestamp: String::new(),
+                timestamp: timestamp.to_string(),
                 tx_type,
                 to,
             })
