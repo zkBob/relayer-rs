@@ -1,5 +1,6 @@
 use actix_http::StatusCode;
-use actix_web::ResponseError;
+use actix_web::{ResponseError, http::header::ContentType, HttpResponse};
+use serde::Serialize;
 
 use crate::routes::{
     fee::fee,
@@ -31,7 +32,12 @@ impl From<std::io::Error> for ServiceError {
 
 impl std::fmt::Display for ServiceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "request failed")
+        let error = match self {
+            ServiceError::BadRequest(err) => format!("BadRequest: {}", err),
+            ServiceError::InternalError => format!("InternalError"),
+        };
+
+        write!(f, "{}", error)
     }
 }
 
@@ -41,5 +47,22 @@ impl ResponseError for ServiceError {
             ServiceError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ServiceError::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
         }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        #[derive(Serialize)]
+        struct ErrorResponse {
+            success: bool,
+            error: String,
+        }
+        
+        let response = serde_json::to_string(&ErrorResponse{
+            success: false,
+            error: format!("{}", self),
+        }).unwrap();
+
+        HttpResponse::build(self.status_code())
+            .insert_header(ContentType::json())
+            .body(response)
     }
 }

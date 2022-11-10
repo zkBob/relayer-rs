@@ -181,6 +181,7 @@ impl CustodyService {
             .map(|account| {
                 let inner = account.inner.read().unwrap();
                 AccountDetailedInfo {
+                    success: true,
                     id: account_id.to_string(),
                     description: account.description.clone(),
                     index: account.next_index().to_string(),

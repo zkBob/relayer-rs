@@ -26,6 +26,7 @@ pub struct AccountShortInfo {
 
 #[derive(Serialize)]
 pub struct AccountDetailedInfo {
+    pub success: bool,
     pub id: String,
     pub description: String,
     pub index: String,
@@ -49,8 +50,8 @@ pub type PoolParams = PoolBN256;
 pub type Fr = <PoolParams as PoolParamsTrait>::Fr;
 pub type Fs = <PoolParams as PoolParamsTrait>::Fs;
 
-// type RelayerState = Data<State<kvdb_rocksdb::Database>>;
 pub type RelayerState<D> = Data<State<D>>;
+
 #[derive(Serialize)]
 struct TransactionData {
     public: TransferPub<Fr>,
@@ -95,3 +96,24 @@ pub struct GenerateAddressResponse {
     pub success: bool,
     pub address: String,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResponse {
+    pub success: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignupResponse {
+    pub success: bool,
+    pub account_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListAccountsResponse {
+    pub success: bool,
+    pub accounts: Vec<AccountShortInfo>,
+}
+
