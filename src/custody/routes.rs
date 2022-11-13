@@ -6,7 +6,7 @@ use kvdb::KeyValueDB;
 use std::{str::FromStr, sync::RwLock};
 use uuid::Uuid;
 
-use crate::{routes::{ServiceError, job::JobResponse}, state::State, types::job::Response, custody::types::TransferResponse};
+use crate::{routes::{ServiceError, job::JobResponse}, state::State, types::job::Response, custody::types::TransferResponse, helpers::BytesRepr};
 
 use super::{
     service::CustodyService,
@@ -130,6 +130,7 @@ pub async fn transfer<D: KeyValueDB>(
     
     custody.sync_account(account_id, state); // TODO: error handling
 
+    let transaction_id = request.id.clone();
     let transaction_request = vec![custody.transfer(request)?];
 
     let relayer_endpoint = format!("{}/sendTransactions", custody.settings.relayer_url);
@@ -158,11 +159,24 @@ pub async fn transfer<D: KeyValueDB>(
         ServiceError::InternalError
     })?;
 
+    // TODO: multitransfer
+    let nullifier = transaction_request[0].proof.inputs[1].bytes();
+    let account = custody.account(account_id)?;
+    account.save_nullifier(&transaction_id, nullifier).map_err(|_| {
+        tracing::error!("failed to save nullifier");
+        ServiceError::InternalError
+    })?;
+
+    custody.save_job_id(&transaction_id, &response.job_id).map_err(|_| {
+        tracing::error!("failed to save job_id");
+        ServiceError::InternalError
+    })?;
+
     tracing::info!("relayer returned the job id: {:#?}", response.job_id );
 
     Ok(HttpResponse::Ok().json(TransferResponse{
         success: true,
-        transaction_id: response.job_id
+        transaction_id
     }))
 }
 
@@ -177,8 +191,9 @@ pub async fn transaction_status<D: KeyValueDB>(
     })?;
 
     let transaction_id = &request.transaction_id;
+    let job_id = custody.get_job_id(transaction_id)?;
 
-    let relayer_endpoint = format!("{}/job/{}", custody.settings.relayer_url, transaction_id);
+    let relayer_endpoint = format!("{}/job/{}", custody.settings.relayer_url, job_id);
 
     let response = reqwest::Client::new()
         .get(relayer_endpoint)

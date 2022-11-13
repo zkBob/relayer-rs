@@ -4,6 +4,7 @@ use crate::{
     types::transaction_request::{Proof, TransactionRequest},
 };
 use kvdb::KeyValueDB;
+use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::ff_uint::NumRepr;
 use libzeropool::{
     circuit::tx::c_transfer,
@@ -21,18 +22,30 @@ use super::{
 };
 use libzkbob_rs::{client::{TokenAmount, TxOutput, TxType}, proof::prove_tx};
 use std::str::FromStr;
+
+pub enum CustodyDbColumn {
+    JobsIndex
+}
+
+impl Into<u32> for CustodyDbColumn {
+    fn into(self) -> u32 {
+        self as u32
+    }
+}
+
 pub struct CustodyService {
     pub settings: CustodyServiceSettings,
     pub accounts: Vec<Account>,
-    pub params: Parameters<Bn256>
+    pub params: Parameters<Bn256>,
+    pub db: kvdb_rocksdb::Database,
 }
 
 impl CustodyService {
-    pub fn new(params: Parameters<Bn256>,settings: CustodyServiceSettings) -> Self {
-        let data_root = &settings.accounts_path;
+    pub fn new(params: Parameters<Bn256>, settings: CustodyServiceSettings) -> Self {
+        let base_path = format!("{}/accounts_data", &settings.db_path);
         let mut accounts = vec![];
 
-        let paths = fs::read_dir(data_root);
+        let paths = fs::read_dir(&base_path);
         if let Ok(paths) = paths {
             tracing::info!("Loading accounts...");
             for path in paths {
@@ -41,18 +54,28 @@ impl CustodyService {
                         let account_id = path.file_name();
                         let account_id = account_id.to_str().unwrap();
                         tracing::info!("Loading: {}", account_id); 
-                        let account = Account::load(&settings.accounts_path, account_id).unwrap();
+                        let account = Account::load(&base_path, account_id).unwrap();
                         accounts.push(account);
                     }   
                 }
             }
         }
+
+        let db = kvdb_rocksdb::Database::open(
+            &DatabaseConfig {
+                columns: 1,
+                ..Default::default()
+            },
+            &format!("{}/custody", &settings.db_path)
+        )
+        .unwrap();
         
-        Self { accounts, settings, params }
+        Self { accounts, settings, params, db }
     }
 
     pub fn new_account(&mut self, description: String) -> Uuid {
-        let account = Account::new(&self.settings.accounts_path, description);
+        let base_path = format!("{}/accounts_data", self.settings.db_path);
+        let account = Account::new(&base_path, description);
         let id = account.id;
         self.accounts.push(account);
         tracing::info!("created a new account: {}", id);
@@ -288,5 +311,31 @@ impl CustodyService {
             .iter()
             .find(|account| account.id == account_id)
             .ok_or(ServiceError::BadRequest(String::from("account with such id doesn't exist")))
+    }
+
+    pub fn save_job_id(&self, transaction_id: &str, job_id: &str) -> Result<(), String> {
+        let tx = {
+            let mut tx = self.db.transaction();
+            tx.put(CustodyDbColumn::JobsIndex.into(), transaction_id.as_bytes(), job_id.as_bytes());
+            tx
+        };
+        self.db.write(tx).map_err(|err| err.to_string())
+    }
+
+    pub fn get_job_id(&self, transaction_id: &str) -> Result<String, ServiceError> {
+        let job_id = self.db.get(CustodyDbColumn::JobsIndex.into(), transaction_id.as_bytes())
+            .map_err(|_| {
+                ServiceError::InternalError
+            })?
+            .ok_or({
+                ServiceError::BadRequest(String::from("transaction with such id not found"))
+            })?;
+
+        let job_id = String::from_utf8(job_id)
+            .map_err(|_| {
+                ServiceError::InternalError
+            })?;
+
+        Ok(job_id)
     }
 }

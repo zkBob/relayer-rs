@@ -7,5 +7,5 @@ web3:
   credentials:
     secret_key: 6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c
 custody:
-  accounts_path: ./accounts_data
+  db_path: ./custody_db
   relayer_url: http://localhost:8000
