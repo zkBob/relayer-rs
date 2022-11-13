@@ -131,6 +131,11 @@ pub async fn transfer<D: KeyValueDB>(
     custody.sync_account(account_id, state); // TODO: error handling
 
     let transaction_id = request.id.clone();
+    if custody.get_job_id(&transaction_id)?.is_some() {
+        return Err(ServiceError::BadRequest(String::from("transaction with such id already exists")));
+    }
+    
+
     let transaction_request = vec![custody.transfer(request)?];
 
     let relayer_endpoint = format!("{}/sendTransactions", custody.settings.relayer_url);
@@ -191,7 +196,10 @@ pub async fn transaction_status<D: KeyValueDB>(
     })?;
 
     let transaction_id = &request.transaction_id;
-    let job_id = custody.get_job_id(transaction_id)?;
+    let job_id = custody.get_job_id(transaction_id)?
+        .ok_or(
+            ServiceError::BadRequest(String::from("transaction with such id not found"))
+        )?;
 
     let relayer_endpoint = format!("{}/job/{}", custody.settings.relayer_url, job_id);
 

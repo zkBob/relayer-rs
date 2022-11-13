@@ -322,20 +322,17 @@ impl CustodyService {
         self.db.write(tx).map_err(|err| err.to_string())
     }
 
-    pub fn get_job_id(&self, transaction_id: &str) -> Result<String, ServiceError> {
-        let job_id = self.db.get(CustodyDbColumn::JobsIndex.into(), transaction_id.as_bytes())
+    pub fn get_job_id(&self, transaction_id: &str) -> Result<Option<String>, ServiceError> {
+        self.db.get(CustodyDbColumn::JobsIndex.into(), transaction_id.as_bytes())
             .map_err(|_| {
                 ServiceError::InternalError
             })?
-            .ok_or({
-                ServiceError::BadRequest(String::from("transaction with such id not found"))
-            })?;
-
-        let job_id = String::from_utf8(job_id)
-            .map_err(|_| {
-                ServiceError::InternalError
-            })?;
-
-        Ok(job_id)
+            .map(|id| {
+                String::from_utf8(id)
+                    .map_err(|_| {
+                        ServiceError::InternalError
+                    })
+            })
+            .map_or(Ok(None), |v| v.map(Some))
     }
 }
