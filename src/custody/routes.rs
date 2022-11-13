@@ -6,11 +6,11 @@ use kvdb::KeyValueDB;
 use std::{str::FromStr, sync::RwLock};
 use uuid::Uuid;
 
-use crate::{routes::ServiceError, state::State, types::job::Response};
+use crate::{routes::{ServiceError, job::JobResponse}, state::State, types::job::Response, custody::types::TransferResponse};
 
 use super::{
     service::CustodyService,
-    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SyncResponse, SignupResponse, ListAccountsResponse, HistoryResponse},
+    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SyncResponse, SignupResponse, ListAccountsResponse, HistoryResponse, TransferStatusRequest, TransferStatusResponse},
 };
 
 pub type Custody = Data<RwLock<CustodyService>>;
@@ -160,7 +160,49 @@ pub async fn transfer<D: KeyValueDB>(
 
     tracing::info!("relayer returned the job id: {:#?}", response.job_id );
 
-    Ok(HttpResponse::Ok().json(response))
+    Ok(HttpResponse::Ok().json(TransferResponse{
+        success: true,
+        transaction_id: response.job_id
+    }))
+}
+
+pub async fn transaction_status<D: KeyValueDB>(
+    request: Query<TransferStatusRequest>,
+    _: Data<State<D>>,
+    custody: Custody,
+) -> Result<HttpResponse, ServiceError> {
+    let custody = custody.read().map_err(|_| {
+        tracing::error!("failed to lock custody service");
+        ServiceError::InternalError
+    })?;
+
+    let transaction_id = &request.transaction_id;
+
+    let relayer_endpoint = format!("{}/job/{}", custody.settings.relayer_url, transaction_id);
+
+    let response = reqwest::Client::new()
+        .get(relayer_endpoint)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "network exception when sending request to relayer: {:#?}",
+                e
+            );
+            ServiceError::InternalError
+        })?;
+
+    let response: JobResponse = response.json().await.map_err(|e| {
+        tracing::error!("the relayer response was not JSON: {:#?}", e);
+        ServiceError::InternalError
+    })?;
+    
+    Ok(HttpResponse::Ok().json(TransferStatusResponse{
+        success: true,
+        state: response.state,
+        tx_hash: response.tx_hash,
+        failed_reason: response.failed_reason,
+    }))
 }
 
 pub async fn generate_shielded_address<D: KeyValueDB>(

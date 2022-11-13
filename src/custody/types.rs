@@ -156,3 +156,28 @@ pub struct HistoryResponse {
     pub txs: Vec<HistoryTx>
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferResponse {
+    pub success: bool,
+    pub transaction_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferStatusRequest {
+    pub transaction_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferStatusResponse {
+    pub success: bool,
+    pub state: String,
+    pub tx_hash: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_reason: Option<String>,
+}
+
+
+

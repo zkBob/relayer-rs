@@ -3,7 +3,6 @@ use actix_web::{
     HttpResponse,
 };
 use kvdb::KeyValueDB;
-use serde::Serialize;
 
 use crate::{
     state::State,

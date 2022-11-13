@@ -12,7 +12,7 @@ use crate::routes::{
 
 mod fee;
 mod info;
-mod job;
+pub mod job;
 pub mod routes;
 pub mod send_transactions;
 mod transactions;
