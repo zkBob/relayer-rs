@@ -162,7 +162,7 @@ pub struct TransferStatusRequest {
 pub struct TransferStatusResponse {
     pub success: bool,
     pub state: String,
-    pub tx_hash: Option<Vec<String>>,
+    pub tx_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed_reason: Option<String>,
 }
