@@ -25,7 +25,8 @@ use libzkbob_rs::{client::{TokenAmount, TxOutput, TxType}, proof::prove_tx};
 use std::str::FromStr;
 
 pub enum CustodyDbColumn {
-    JobsIndex
+    JobsIndex,
+    NullifierIndex
 }
 
 impl Into<u32> for CustodyDbColumn {
@@ -64,7 +65,7 @@ impl CustodyService {
 
         let db = kvdb_rocksdb::Database::open(
             &DatabaseConfig {
-                columns: 1,
+                columns: 2,
                 ..Default::default()
             },
             &format!("{}/custody", &settings.db_path)
@@ -344,5 +345,25 @@ impl CustodyService {
                     })
             })
             .map_or(Ok(None), |v| v.map(Some))
+    }
+
+    pub fn save_nullifier(&self, transaction_id: &str, nullifier: Vec<u8>) -> Result<(), String> {
+        let tx = {
+            let mut tx = self.db.transaction();
+            tx.put(CustodyDbColumn::NullifierIndex.into(), &nullifier, transaction_id.as_bytes());
+            tx
+        };
+        self.db.write(tx).map_err(|err| err.to_string())
+    }
+
+    pub fn get_transaction_id(&self, nullifier: Vec<u8>) -> Result<String, String> {
+        let transaction_id = self.db.get(CustodyDbColumn::NullifierIndex.into(), &nullifier)
+            .map_err(|err| err.to_string())?
+            .ok_or("transaction id not found")?;
+
+        let transaction_id = String::from_utf8(transaction_id)
+            .map_err(|err| err.to_string())?;
+
+        Ok(transaction_id)
     }
 }

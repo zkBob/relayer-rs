@@ -85,27 +85,9 @@ impl Account {
         inner.keys.sk
     }
 
-    pub fn save_nullifier(&self, transaction_id: &str, nullifier: Vec<u8>) -> Result<(), String> {
-        let tx = {
-            let mut tx = self.history.transaction();
-            tx.put(HistoryDbColumn::NullifierIndex.into(), &nullifier, transaction_id.as_bytes());
-            tx
-        };
-        self.history.write(tx).map_err(|err| err.to_string())
-    }
-
-    pub fn get_transaction_id(&self, nullifier: Vec<u8>) -> Result<String, String> {
-        let transaction_id = self.history.get(HistoryDbColumn::NullifierIndex.into(), &nullifier)
-            .map_err(|err| err.to_string())?
-            .ok_or("transaction id not found")?;
-
-        let transaction_id = String::from_utf8(transaction_id)
-            .map_err(|err| err.to_string())?;
-
-        Ok(transaction_id)
-    }
-
-    pub async fn history(&self, pool: &Pool) -> Vec<HistoryTx> {
+    pub async fn history<F>(&self, pool: &Pool, get_transaction_id: F) -> Vec<HistoryTx> 
+        where F: Fn(Vec<u8>) -> Result<String, String> 
+    {
         let mut history = vec![];
         for (_, value) in self.history.iter(HistoryDbColumn::NotesIndex.into()) {
             let tx: HistoryRecord = serde_json::from_slice(&value).unwrap();
@@ -149,7 +131,7 @@ impl Account {
                 }
             };
 
-            let transaction_id = self.get_transaction_id(nullifier).ok();
+            let transaction_id = get_transaction_id(nullifier).ok();
             
             let timestamp = pool.block_timestamp(tx.block_num).await.unwrap();
             history.push(HistoryTx {
@@ -209,7 +191,7 @@ impl Account {
             description,
             history: kvdb_rocksdb::Database::open(
                 &DatabaseConfig {
-                    columns: 2,
+                    columns: 1,
                     ..Default::default()
                 },
                 &data_file_path(base_path, id, DataType::History)
@@ -255,7 +237,7 @@ impl Account {
             description,
             history: kvdb_rocksdb::Database::open(
                 &DatabaseConfig {
-                    columns: 2,
+                    columns: 1,
                     ..Default::default()
                 },
                 &data_file_path(base_path, id, DataType::History)

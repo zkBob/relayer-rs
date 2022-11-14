@@ -166,8 +166,7 @@ pub async fn transfer<D: KeyValueDB>(
 
     // TODO: multitransfer
     let nullifier = transaction_request[0].proof.inputs[1].bytes();
-    let account = custody.account(account_id)?;
-    account.save_nullifier(&transaction_id, nullifier).map_err(|_| {
+    custody.save_nullifier(&transaction_id, nullifier).map_err(|_| {
         tracing::error!("failed to save nullifier");
         ServiceError::InternalError
     })?;
@@ -268,7 +267,7 @@ pub async fn history<D: KeyValueDB>(
     })?;
 
     let account = custody.account(account_id)?;
-    let txs = account.history(&state.pool).await;
+    let txs = account.history(&state.pool, |nullifier: Vec<u8>| custody.get_transaction_id(nullifier)).await;
 
     Ok(HttpResponse::Ok().json(HistoryResponse{
         success: true,
