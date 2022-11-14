@@ -2,7 +2,6 @@ use actix_web::{
     web::{self, Data},
     HttpResponse,
 };
-use tracing::Instrument;
 
 use crate::{
     state::State,

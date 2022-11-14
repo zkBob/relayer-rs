@@ -40,7 +40,7 @@ pub struct AccountDetailedInfo {
 }
 
 pub enum HistoryDbColumn {
-    TxHashIndex,
+    NullifierIndex,
     NotesIndex,
 }
 
@@ -87,7 +87,7 @@ pub struct AccountInfoRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferRequest {
-    pub id: Option<String>,
+    pub id: String,
     pub account_id: String,
     pub amount:u64,
     pub to: String,
@@ -96,14 +96,7 @@ pub struct TransferRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateAddressResponse {
-    pub success: bool,
     pub address: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncResponse {
-    pub success: bool,
 }
 
 #[derive(Serialize)]
@@ -137,6 +130,8 @@ pub struct HistoryTx {
     pub amount: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -145,6 +140,31 @@ pub struct HistoryRecord {
     pub tx_hash: H256,
     pub calldata: Vec<u8>,
     pub block_num: U64,
+}
+
+
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferResponse {
+    pub success: bool,
+    pub transaction_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferStatusRequest {
+    pub transaction_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferStatusResponse {
+    pub success: bool,
+    pub state: String,
+    pub tx_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_reason: Option<String>,
 }
 
 

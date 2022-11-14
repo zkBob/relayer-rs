@@ -5,27 +5,27 @@ use actix_web::{
     HttpResponse,
 };
 use kvdb::KeyValueDB;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
 use crate::{state::{State, JobsDbColumn}, types::job::{Job, JobStatus}};
 
 use super::ServiceError;
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobResponse {
+    pub state: String,
+    pub tx_hash: Option<String>,
+    pub failed_reason: Option<String>,
+    pub created_on: u128,
+    pub finished_on: u128,
+}
+
 pub async fn job<D: KeyValueDB>(
     path: web::Path<String>,
     state: Data<State<D>>,
 ) -> Result<HttpResponse, ServiceError> {
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct JobResponse {
-        state: String,
-        tx_hash: Option<Vec<String>>,
-        failed_reason: Option<String>,
-        created_on: u128,
-        finished_on: u128,
-    }
-
     let job_id = path.into_inner();
     let job_id = Uuid::parse_str(&job_id)
         .map_err(|_| ServiceError::BadRequest(String::from("failed to parse job id")))?;
@@ -55,7 +55,7 @@ pub async fn job<D: KeyValueDB>(
     };
 
     if job.transaction.is_some() {
-        response.tx_hash = Some(vec![format!("{:#x}", job.transaction.unwrap().hash)]);
+        response.tx_hash = Some(format!("{:#x}", job.transaction.unwrap().hash));
     }
 
     if job.status == JobStatus::Rejected {
