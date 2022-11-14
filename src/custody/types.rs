@@ -96,27 +96,18 @@ pub struct TransferRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateAddressResponse {
-    pub success: bool,
     pub address: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SyncResponse {
-    pub success: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SignupResponse {
-    pub success: bool,
     pub account_id: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListAccountsResponse {
-    pub success: bool,
     pub accounts: Vec<AccountShortInfo>,
 }
 
@@ -151,12 +142,7 @@ pub struct HistoryRecord {
     pub block_num: U64,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HistoryResponse {
-    pub success: bool,
-    pub txs: Vec<HistoryTx>
-}
+
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

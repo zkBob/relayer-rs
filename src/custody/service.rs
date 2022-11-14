@@ -320,7 +320,7 @@ impl CustodyService {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
-            .ok_or(ServiceError::BadRequest(String::from("account with such id doesn't exist")))
+            .ok_or(ServiceError::AccountNotFound)
     }
 
     pub fn save_job_id(&self, transaction_id: &str, job_id: &str) -> Result<(), String> {
@@ -332,7 +332,7 @@ impl CustodyService {
         self.db.write(tx).map_err(|err| err.to_string())
     }
 
-    pub fn get_job_id(&self, transaction_id: &str) -> Result<Option<String>, ServiceError> {
+    pub fn get_job_by_request_id(&self, transaction_id: &str) -> Result<Option<String>, ServiceError> {
         self.db.get(CustodyDbColumn::JobsIndex.into(), transaction_id.as_bytes())
             .map_err(|_| {
                 ServiceError::InternalError
