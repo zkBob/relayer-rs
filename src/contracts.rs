@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use ethabi::ethereum_types::U64;
 use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::Num};
 use secp256k1::SecretKey;
 use web3::{
@@ -7,7 +8,7 @@ use web3::{
     transports::Http,
     types::{
         BlockNumber, Bytes, FilterBuilder, Log, LogWithMeta, Transaction, TransactionId,
-        TransactionReceipt, H160, H256, U256,
+        TransactionReceipt, H160, H256, U256, BlockId,
     },
     Error as Web3Error, Web3,
 };
@@ -181,6 +182,11 @@ impl Pool {
             .map_err(|e| e.to_string())?;
 
         Ok(tx_hash)
+    }
+
+    pub async fn block_timestamp(&self, block_number: U64) -> Result<U256, Web3Error> {
+        let block = self.web3.eth().block(BlockId::Number(BlockNumber::Number(block_number))).await?.unwrap();
+        Ok(block.timestamp)
     }
 
     async fn gas_price(&self) -> Result<U256, Web3Error> {

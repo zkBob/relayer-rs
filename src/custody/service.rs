@@ -1,5 +1,5 @@
 use crate::{
-    custody::{tx_parser::ParseResult, types::HistoryDbColumn},
+    custody::{tx_parser::ParseResult, types::{HistoryDbColumn, HistoryRecord}},
     routes::ServiceError,
     types::transaction_request::{Proof, TransactionRequest},
 };
@@ -256,10 +256,21 @@ impl CustodyService {
 
             let mut batch = account.history.transaction();
             decrypted_memos.iter().for_each(|memo| {
+                let jobs = relayer_state.get_jobs(memo.index, 1).unwrap(); 
+                let job = jobs.first().unwrap();
+                let tx = job.transaction.as_ref().unwrap();
+                
+                let record = HistoryRecord {
+                    dec_memo: memo.clone(),
+                    tx_hash: tx.hash,
+                    calldata: tx.input.0.clone(),
+                    block_num: tx.block_number.unwrap()
+                };
+
                 batch.put_vec(
                     HistoryDbColumn::NotesIndex.into(),
                     &tx_parser::index_key(memo.index),
-                    serde_json::to_vec(memo).unwrap(),
+                    serde_json::to_vec(&record).unwrap(),
                 );
             });
 
@@ -276,6 +287,6 @@ impl CustodyService {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
-            .ok_or(ServiceError::BadRequest(String::from("account with such id doesn't exist")))
+            .ok_or(ServiceError::AccountNotFound)
     }
 }

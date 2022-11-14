@@ -84,7 +84,6 @@ pub async fn signup<D: KeyValueDB>(
     let account_id = custody.new_account(request.0.description);
 
     Ok(HttpResponse::Ok().json(SignupResponse{
-        success: true,
         account_id: account_id.to_string()
     }))
 }
@@ -106,7 +105,6 @@ pub async fn list_accounts<D: KeyValueDB>(
     let finalized = state.finalized.lock().unwrap();
 
     Ok(HttpResponse::Ok().json(ListAccountsResponse{
-        success: true,
         accounts: custody.list_accounts(finalized.next_index()
     )}))
 }
@@ -185,4 +183,27 @@ pub async fn generate_shielded_address<D: KeyValueDB>(
         success: true,
         address,
     }))
+}
+
+pub async fn history<D: KeyValueDB>(
+    request: Query<AccountInfoRequest>,
+    state: Data<State<D>>,
+    custody: Custody,
+) -> Result<HttpResponse, ServiceError> {
+    let custody = custody.read().map_err(|_| {
+        tracing::error!("failed to lock custody service");
+        ServiceError::InternalError
+    })?;
+
+    let account_id = Uuid::from_str(&request.id).map_err(|err| {
+        tracing::error!("failed to parse account id: {}", err);
+        ServiceError::BadRequest(String::from("failed to parse account id"))
+    })?;
+
+    let account = custody.account(account_id)?;
+    let txs = account.history(&state.pool).await;
+
+    Ok(HttpResponse::Ok().json(
+        txs 
+    ))
 }

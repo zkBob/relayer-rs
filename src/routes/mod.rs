@@ -22,6 +22,7 @@ pub mod wallet_screening;
 pub enum ServiceError {
     BadRequest(String),
     InternalError,
+    AccountNotFound
 }
 
 impl From<std::io::Error> for ServiceError {
@@ -35,6 +36,7 @@ impl std::fmt::Display for ServiceError {
         let error = match self {
             ServiceError::BadRequest(err) => format!("BadRequest: {}", err),
             ServiceError::InternalError => format!("InternalError"),
+            ServiceError::AccountNotFound => "Account not found".to_string(),
         };
 
         write!(f, "{}", error)
@@ -46,6 +48,7 @@ impl ResponseError for ServiceError {
         match self {
             ServiceError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ServiceError::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
+            ServiceError::AccountNotFound => StatusCode::NOT_FOUND,
         }
     }
 
