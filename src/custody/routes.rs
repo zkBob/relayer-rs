@@ -10,7 +10,7 @@ use crate::{routes::{ServiceError, job::JobResponse}, state::State, types::job::
 
 use super::{
     service::CustodyService,
-    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SyncResponse, SignupResponse, ListAccountsResponse, HistoryResponse, TransferStatusRequest, TransferStatusResponse},
+    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SyncResponse, SignupResponse, ListAccountsResponse, HistoryResponse, TransferStatusRequest, TransactionStatusResponse},
 };
 
 pub type Custody = Data<RwLock<CustodyService>>;
@@ -35,7 +35,7 @@ pub async fn sync_account<D: KeyValueDB>(
         ServiceError::BadRequest(String::from("failed to parse account id"))
     })?;
 
-    custody.sync_account(account_id, relayer_state);
+    custody.sync_account(account_id, relayer_state)?;
 
     Ok(HttpResponse::Ok().json(SyncResponse{
         success: true
@@ -128,7 +128,7 @@ pub async fn transfer<D: KeyValueDB>(
         ServiceError::InternalError
     })?;
     
-    custody.sync_account(account_id, state); // TODO: error handling
+    custody.sync_account(account_id, state)?;
 
     let transaction_id = request.id.clone();
     if custody.get_job_id(&transaction_id)?.is_some() {
@@ -220,10 +220,10 @@ pub async fn transaction_status<D: KeyValueDB>(
         ServiceError::InternalError
     })?;
     
-    Ok(HttpResponse::Ok().json(TransferStatusResponse{
+    Ok(HttpResponse::Ok().json(TransactionStatusResponse{
         success: true,
         state: response.state,
-        tx_hash: response.tx_hash,
+        tx_hash: response.tx_hash.map(|v| v[0].clone()),
         failed_reason: response.failed_reason,
     }))
 }

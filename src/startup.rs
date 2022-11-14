@@ -54,6 +54,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let custody = Data::new(RwLock::new(CustodyService::new(
             tx_params,
             configuration.custody,
+            state.clone(),
         )));
         let server = routes::run(listener, state.clone(), custody)?;
         // let custody = custody.clone();

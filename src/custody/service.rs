@@ -1,8 +1,9 @@
 use crate::{
     custody::{tx_parser::ParseResult, types::{HistoryDbColumn, HistoryRecord}},
     routes::ServiceError,
-    types::transaction_request::{Proof, TransactionRequest},
+    types::transaction_request::{Proof, TransactionRequest}, state::State,
 };
+use actix_web::web::Data;
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::ff_uint::NumRepr;
@@ -12,7 +13,7 @@ use libzeropool::{
     fawkes_crypto::{backend::bellman_groth16::prover::prove, ff_uint::Num},
 };
 use memo_parser::memo::TxType as MemoTxType;
-use std::{time::SystemTime, fs};
+use std::{time::{SystemTime, Duration}, fs, thread};
 use uuid::Uuid;
 
 use super::{
@@ -41,7 +42,7 @@ pub struct CustodyService {
 }
 
 impl CustodyService {
-    pub fn new(params: Parameters<Bn256>, settings: CustodyServiceSettings) -> Self {
+    pub fn new<D: KeyValueDB>(params: Parameters<Bn256>, settings: CustodyServiceSettings, state: Data<State<D>>) -> Self {
         let base_path = format!("{}/accounts_data", &settings.db_path);
         let mut accounts = vec![];
 
@@ -69,6 +70,16 @@ impl CustodyService {
             &format!("{}/custody", &settings.db_path)
         )
         .unwrap();
+
+        let sync_interval = Duration::from_secs(settings.sync_interval_sec);
+        thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            loop {
+                tracing::debug!("Sync custody state...");
+                rt.block_on(state.sync()).unwrap();
+                thread::sleep(sync_interval);
+            }
+        });
         
         Self { accounts, settings, params, db }
     }
@@ -231,79 +242,78 @@ impl CustodyService {
             .collect()
     }
 
-    pub fn sync_account<D: KeyValueDB>(&self, account_id: Uuid, relayer_state: RelayerState<D>) {
+    pub fn sync_account<D: KeyValueDB>(&self, account_id: Uuid, relayer_state: RelayerState<D>) -> Result<(), ServiceError> {
         tracing::info!("starting sync for account {}", account_id);
-        if let Some(account) = self
-            .accounts
-            .iter()
-            .find(|account| account.id == account_id)
-        {
-            tracing::info!("account {} found", account_id);
-            let start_index = account.next_index();
+        let account = self.account(account_id)?;
 
+        tracing::info!("account {} found", account_id);
+        let start_index = account.next_index();
+        let finalized_index = {
             let finalized = relayer_state.finalized.lock().unwrap();
-            let finalized_index = finalized.next_index();
-            tracing::info!(
-                "account {}, account_index = {}, finalized index = {} ",
-                account_id,
-                start_index,
-                finalized_index
+            finalized.next_index()
+        };
+        tracing::info!(
+            "account {}, account_index = {}, finalized index = {} ",
+            account_id,
+            start_index,
+            finalized_index
+        );
+        
+        // TODO: error instead of unwrap
+        let jobs = relayer_state
+            .get_jobs(start_index, finalized_index)
+            .unwrap();
+
+        let indexed_txs: Vec<IndexedTx> = jobs
+            .iter()
+            .map(|item| IndexedTx {
+                index: item.index,
+                memo: item.memo.clone(),
+                commitment: item.commitment,
+            })
+            .collect();
+
+        let job_indices: Vec<u64> = jobs.iter().map(|j| j.index).collect();
+
+        tracing::info!("jobs to sync {:#?}", job_indices);
+
+        let parse_result: ParseResult =
+            TxParser::new().parse_native_tx(account.sk(), indexed_txs);
+
+        tracing::info!(
+            "retrieved new_accounts: {:#?} \n new notes: {:#?}",
+            parse_result.state_update.new_accounts,
+            parse_result.state_update.new_notes
+        );
+        let decrypted_memos = parse_result.decrypted_memos;
+
+        let mut batch = account.history.transaction();
+        decrypted_memos.iter().for_each(|memo| {
+            let jobs = relayer_state.get_jobs(memo.index, 1).unwrap(); 
+            let job = jobs.first().unwrap();
+            let tx = job.transaction.as_ref().unwrap();
+            
+            let record = HistoryRecord {
+                dec_memo: memo.clone(),
+                tx_hash: tx.hash,
+                calldata: tx.input.0.clone(),
+                block_num: tx.block_number.unwrap()
+            };
+
+            batch.put_vec(
+                HistoryDbColumn::NotesIndex.into(),
+                &tx_parser::index_key(memo.index),
+                serde_json::to_vec(&record).unwrap(),
             );
-            // let batch_size = ??? as u64; //TODO: loop
-            let jobs = relayer_state
-                .get_jobs(start_index, finalized_index)
-                .unwrap();
+        });
 
-            let indexed_txs: Vec<IndexedTx> = jobs
-                .iter()
-                .map(|item| IndexedTx {
-                    index: item.index,
-                    memo: item.memo.clone(),
-                    commitment: item.commitment,
-                })
-                .collect();
+        account.history.write(batch).unwrap();
+        tracing::info!("account {} saved history", account_id);
 
-            let job_indices: Vec<u64> = jobs.iter().map(|j| j.index).collect();
+        account.update_state(parse_result.state_update);
+        tracing::info!("account {} state updated", account_id);
 
-            tracing::info!("jobs to sync {:#?}", job_indices);
-
-            let parse_result: ParseResult =
-                TxParser::new().parse_native_tx(account.sk(), indexed_txs);
-
-            tracing::info!(
-                "retrieved new_accounts: {:#?} \n new notes: {:#?}",
-                parse_result.state_update.new_accounts,
-                parse_result.state_update.new_notes
-            );
-            let decrypted_memos = parse_result.decrypted_memos;
-
-            let mut batch = account.history.transaction();
-            decrypted_memos.iter().for_each(|memo| {
-                let jobs = relayer_state.get_jobs(memo.index, 1).unwrap(); 
-                let job = jobs.first().unwrap();
-                let tx = job.transaction.as_ref().unwrap();
-                
-                let record = HistoryRecord {
-                    dec_memo: memo.clone(),
-                    tx_hash: tx.hash,
-                    calldata: tx.input.0.clone(),
-                    block_num: tx.block_number.unwrap()
-                };
-
-                batch.put_vec(
-                    HistoryDbColumn::NotesIndex.into(),
-                    &tx_parser::index_key(memo.index),
-                    serde_json::to_vec(&record).unwrap(),
-                );
-            });
-
-            account.history.write(batch).unwrap();
-            tracing::info!("account {} saved history", account_id);
-
-            account.update_state(parse_result.state_update);
-            tracing::info!("account {} state updated", account_id);
-        }
-        ()
+        Ok(())
     }
 
     pub fn account(&self, account_id: Uuid) -> Result<&Account, ServiceError> {
