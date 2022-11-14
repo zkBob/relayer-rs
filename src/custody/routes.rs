@@ -10,7 +10,7 @@ use crate::{routes::{ServiceError, job::JobResponse}, state::State, types::job::
 
 use super::{
     service::CustodyService,
-    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SyncResponse, SignupResponse, ListAccountsResponse, HistoryResponse, TransferStatusRequest, TransferStatusResponse},
+    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SyncResponse, SignupResponse, ListAccountsResponse, TransferStatusRequest, TransferStatusResponse},
 };
 
 pub type Custody = Data<RwLock<CustodyService>>;
@@ -84,7 +84,6 @@ pub async fn signup<D: KeyValueDB>(
     let account_id = custody.new_account(request.0.description);
 
     Ok(HttpResponse::Ok().json(SignupResponse{
-        success: true,
         account_id: account_id.to_string()
     }))
 }
@@ -106,7 +105,6 @@ pub async fn list_accounts<D: KeyValueDB>(
     let finalized = state.finalized.lock().unwrap();
 
     Ok(HttpResponse::Ok().json(ListAccountsResponse{
-        success: true,
         accounts: custody.list_accounts(finalized.next_index()
     )}))
 }
@@ -270,8 +268,7 @@ pub async fn history<D: KeyValueDB>(
     let account = custody.account(account_id)?;
     let txs = account.history(&state.pool).await;
 
-    Ok(HttpResponse::Ok().json(HistoryResponse{
-        success: true,
+    Ok(HttpResponse::Ok().json(
         txs 
-    }))
+    ))
 }

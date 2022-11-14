@@ -310,7 +310,7 @@ impl CustodyService {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
-            .ok_or(ServiceError::BadRequest(String::from("account with such id doesn't exist")))
+            .ok_or(ServiceError::AccountNotFound)
     }
 
     pub fn save_job_id(&self, transaction_id: &str, job_id: &str) -> Result<(), String> {
