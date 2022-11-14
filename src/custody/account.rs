@@ -85,6 +85,11 @@ impl Account {
         inner.keys.sk
     }
 
+    pub fn generate_address(&self) -> String {
+        let inner = self.inner.read().unwrap();
+        inner.generate_address()
+    }
+
     pub async fn history<F>(&self, pool: &Pool, get_transaction_id: F) -> Vec<HistoryTx> 
         where F: Fn(Vec<u8>) -> Result<String, String> 
     {
