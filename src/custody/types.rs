@@ -96,14 +96,7 @@ pub struct TransferRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateAddressResponse {
-    pub success: bool,
     pub address: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncResponse {
-    pub success: bool,
 }
 
 #[derive(Serialize)]

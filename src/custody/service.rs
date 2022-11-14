@@ -322,7 +322,7 @@ impl CustodyService {
         self.db.write(tx).map_err(|err| err.to_string())
     }
 
-    pub fn get_job_id(&self, transaction_id: &str) -> Result<Option<String>, ServiceError> {
+    pub fn get_job_by_request_id(&self, transaction_id: &str) -> Result<Option<String>, ServiceError> {
         self.db.get(CustodyDbColumn::JobsIndex.into(), transaction_id.as_bytes())
             .map_err(|_| {
                 ServiceError::InternalError
