@@ -1,8 +1,10 @@
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
 use libzeropool::POOL_PARAMS;
+use libzeropool::fawkes_crypto::rand::Rng;
 use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
 use libzkbob_rs::address;
+use libzkbob_rs::random::CustomRng;
 use libzkbob_rs::{
     client::{state::State, UserAccount as NativeUserAccount},
     merkle::MerkleTree,
@@ -179,10 +181,8 @@ impl Account {
             .unwrap(),
         );
 
-        //"increase dial aisle hedgehog tree genre replace deliver boat tower furnace image"
-        let dummy_sk =
-            hex::decode("e0f3b09c27af2986df5c4157dc54e7b43d73748ccf2568e2ea21f2037b887800")
-                .unwrap();
+        let mut rng = CustomRng;
+        let sk: [u8; 32] = rng.gen();
 
         let account_db = kvdb_rocksdb::Database::open(
             &DatabaseConfig {
@@ -196,13 +196,13 @@ impl Account {
         account_db.write(
             {
                 let mut tx = account_db.transaction();
-                tx.put(0, "sk".as_bytes(), &dummy_sk);
+                tx.put(0, "sk".as_bytes(), &sk);
                 tx.put(0, "description".as_bytes(), description.as_bytes());
                 tx
             }
         ).unwrap();
 
-        let user_account = NativeUserAccount::from_seed(&dummy_sk, state, POOL_PARAMS.clone());
+        let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
         Self {
             inner: RwLock::new(user_account),
             id,
