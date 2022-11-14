@@ -238,7 +238,7 @@ impl CustodyService {
             .collect()
     }
 
-    pub fn sync_account<D: KeyValueDB>(&self, account_id: Uuid, relayer_state: RelayerState<D>) -> Result<(), CustodyServiceError> {
+    pub fn sync_account<D: KeyValueDB>(&self, account_id: Uuid, relayer_state: &RelayerState<D>) -> Result<(), CustodyServiceError> {
         tracing::info!("starting sync for account {}", account_id);
         let account = self.account(account_id)?;
 

@@ -15,32 +15,6 @@ use super::{
 
 pub type Custody = Data<RwLock<CustodyService>>;
 
-pub async fn sync_account<D: KeyValueDB>(
-    request: Query<AccountInfoRequest>,
-    relayer_state: Data<State<D>>,
-    custody: Custody,
-) -> Result<HttpResponse, CustodyServiceError> {
-    let account_id = Uuid::from_str(&request.id).map_err(|err| {
-        tracing::error!("failed to parse account id: {}", err);
-        CustodyServiceError::IncorrectAccountId
-    })?;
-
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
-
-    relayer_state.sync().await.map_err(|_| {
-        tracing::error!("failed to sync state");
-        CustodyServiceError::StateSyncError
-    })?;
-
-    custody.sync_account(account_id, relayer_state)?;
-
-    Ok(HttpResponse::Ok().json(SyncResponse{
-        success: true
-    }))
-}
 pub async fn account_info<D: KeyValueDB>(
     request: Query<AccountInfoRequest>,
     state: Data<State<D>>,
@@ -60,6 +34,8 @@ pub async fn account_info<D: KeyValueDB>(
         tracing::error!("failed to sync state");
         CustodyServiceError::StateSyncError
     })?;
+
+    custody.sync_account(account_id, &state)?;
 
     let state = state.finalized.lock().unwrap();
     let relayer_index = state.next_index();
@@ -102,7 +78,7 @@ pub async fn list_accounts<D: KeyValueDB>(
         tracing::error!("failed to sync state");
         CustodyServiceError::StateSyncError
     })?;
-
+    
     let finalized = state.finalized.lock().unwrap();
 
     Ok(HttpResponse::Ok().json(ListAccountsResponse{
@@ -128,7 +104,7 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::CustodyLockError
     })?;
     
-    custody.sync_account(account_id, state)?;
+    custody.sync_account(account_id, &state)?;
 
     let transaction_id = request.id.clone();
     if custody.get_job_id(&transaction_id)?.is_some() {
@@ -263,6 +239,8 @@ pub async fn history<D: KeyValueDB>(
         tracing::error!("failed to lock custody service");
         CustodyServiceError::CustodyLockError
     })?;
+
+    custody.sync_account(account_id, &state)?;
 
     let account = custody.account(account_id)?;
     let txs = account.history(&state.pool, |nullifier: Vec<u8>| custody.get_transaction_id(nullifier)).await;
