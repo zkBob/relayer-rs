@@ -9,3 +9,4 @@ web3:
 custody:
   db_path: ./custody_db
   relayer_url: http://localhost:8000
+  sync_interval_sec: 30

@@ -18,8 +18,9 @@ use super::{
     service::CustodyService,
     types::{
         AccountInfoRequest, GenerateAddressResponse, SignupRequest, SignupResponse,
-        TransferRequest, TransferStatusRequest, TransferStatusResponse,
+        TransferRequest, TransferStatusRequest, TransactionStatusResponse,
     },
+
 };
 
 pub type Custody = Data<RwLock<CustodyService>>;
@@ -44,7 +45,7 @@ pub async fn sync_account<D: KeyValueDB>(
         ServiceError::BadRequest(String::from("failed to parse account id"))
     })?;
 
-    custody.sync_account(account_id, relayer_state);
+    custody.sync_account(account_id, relayer_state)?;
 
     Ok(HttpResponse::Ok().finish())
 }
@@ -134,7 +135,9 @@ pub async fn transfer<D: KeyValueDB>(
         ServiceError::InternalError
     })?;
 
-    custody.sync_account(account_id, state); // TODO: error handling
+    
+    custody.sync_account(account_id, state)?;
+
 
     let transaction_id = request.id.clone();
     if custody.get_job_by_request_id(&transaction_id)?.is_some() {
@@ -232,8 +235,7 @@ pub async fn transaction_status<D: KeyValueDB>(
         ServiceError::InternalError
     })?;
 
-    Ok(HttpResponse::Ok().json(TransferStatusResponse {
-        success: true,
+    Ok(HttpResponse::Ok().json(TransactionStatusResponse {
         state: response.state,
         tx_hash: response.tx_hash,
         failed_reason: response.failed_reason,
