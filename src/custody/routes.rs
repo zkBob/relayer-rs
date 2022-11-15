@@ -18,7 +18,7 @@ use super::{
     service::CustodyService,
     types::{
         AccountInfoRequest, GenerateAddressResponse, SignupRequest, SignupResponse,
-        TransferRequest, TransferStatusRequest, TransferStatusResponse,
+        TransferRequest, TransferStatusRequest, TransactionStatusResponse,
     },
 
 };
@@ -235,10 +235,9 @@ pub async fn transaction_status<D: KeyValueDB>(
         ServiceError::InternalError
     })?;
 
-    Ok(HttpResponse::Ok().json(TransferStatusResponse {
-        success: true,
+    Ok(HttpResponse::Ok().json(TransactionStatusResponse {
         state: response.state,
-        tx_hash: response.tx_hash.map(|v| v[0].clone()),
+        tx_hash: response.tx_hash,
         failed_reason: response.failed_reason,
     }))
 }

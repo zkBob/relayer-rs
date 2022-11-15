@@ -160,8 +160,8 @@ pub struct TransferStatusRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionStatusResponse {
-    pub success: bool,
     pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed_reason: Option<String>,
