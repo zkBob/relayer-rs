@@ -202,39 +202,18 @@ impl CustodyService {
 
     pub fn account_info(
         &self,
-        account_id: Uuid,
-        relayer_index: u64,
-    ) -> Option<AccountDetailedInfo> {
+        account_id: Uuid
+    ) -> Option<AccountShortInfo> {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
-            .map(|account| {
-                let inner = account.inner.read().unwrap();
-                AccountDetailedInfo {
-                    success: true,
-                    id: account_id.to_string(),
-                    description: account.description.clone(),
-                    index: account.next_index().to_string(),
-                    sync_status: relayer_index == account.next_index(),
-                    total_balance: inner.state.total_balance().to_string(),
-                    account_balance: inner.state.account_balance().to_string(),
-                    note_balance: inner.state.note_balance().to_string(),
-                }
-            })
+            .map(Account::short_info)
     }
 
-    pub fn list_accounts(&self, relayer_index: u64) -> Vec<AccountShortInfo> {
+    pub fn list_accounts(&self) -> Vec<AccountShortInfo> {
         self.accounts
             .iter()
-            // .find(|account| account.id == account_id)
-            .map(|account| {
-                AccountShortInfo {
-                    id: account.id.to_string(),
-                    description: account.description.clone(),
-                    index: account.next_index().to_string(),
-                    sync_status: relayer_index == account.next_index(),
-                }
-            })
+            .map(Account::short_info)
             .collect()
     }
 

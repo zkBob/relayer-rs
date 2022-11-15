@@ -23,13 +23,11 @@ use super::tx_parser::DecMemo;
 pub struct AccountShortInfo {
     pub id: String,
     pub description: String,
-    pub index: String,
-    pub sync_status: bool,
+    pub balance: String,
 }
 
 #[derive(Serialize)]
 pub struct AccountDetailedInfo {
-    pub success: bool,
     pub id: String,
     pub description: String,
     pub index: String,
@@ -86,7 +84,7 @@ pub struct AccountInfoRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferRequest {
-    pub id: String,
+    pub request_id: Option<String>,
     pub account_id: String,
     pub amount:u64,
     pub to: String,
@@ -124,7 +122,6 @@ pub enum HistoryTxType {
 pub struct HistoryTx {
     pub tx_type: HistoryTxType,
     pub tx_hash: String,
-    pub tx_index: String,
     pub timestamp: String,
     pub amount: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -146,14 +143,13 @@ pub struct HistoryRecord {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferResponse {
-    pub success: bool,
-    pub transaction_id: String,
+    pub request_id: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferStatusRequest {
-    pub transaction_id: String,
+    pub request_id: String,
 }
 
 #[derive(Serialize)]

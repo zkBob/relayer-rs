@@ -37,10 +37,7 @@ pub async fn account_info<D: KeyValueDB>(
 
     custody.sync_account(account_id, &state)?;
 
-    let state = state.finalized.lock().unwrap();
-    let relayer_index = state.next_index();
-
-    let account_info = custody.account_info(account_id, relayer_index).ok_or(
+    let account_info = custody.account_info(account_id).ok_or(
         CustodyServiceError::AccountNotFound
     )?;
 
@@ -78,9 +75,8 @@ pub async fn list_accounts<D: KeyValueDB>(
         CustodyServiceError::StateSyncError
     })?;
     
-    let finalized = state.finalized.lock().unwrap();
 
-    Ok(HttpResponse::Ok().json(custody.list_accounts(finalized.next_index())))
+    Ok(HttpResponse::Ok().json(custody.list_accounts()))
 }
 
 pub async fn transfer<D: KeyValueDB>(
@@ -104,8 +100,8 @@ pub async fn transfer<D: KeyValueDB>(
     custody.sync_account(account_id, &state)?;
 
 
-    let transaction_id = request.id.clone();
-    if custody.get_job_by_request_id(&transaction_id)?.is_some() {
+    let request_id = request.request_id.clone().unwrap_or(Uuid::new_v4().to_string());
+    if custody.get_job_by_request_id(&request_id)?.is_some() {
         return Err(CustodyServiceError::DuplicateTransactionId);
     }
 
@@ -139,12 +135,12 @@ pub async fn transfer<D: KeyValueDB>(
 
     // TODO: multitransfer
     let nullifier = transaction_request[0].proof.inputs[1].bytes();
-    custody.save_nullifier(&transaction_id, nullifier).map_err(|err| {
+    custody.save_nullifier(&request_id, nullifier).map_err(|err| {
         tracing::error!("failed to save nullifier: {}", err);
         CustodyServiceError::DataBaseWriteError
     })?;
 
-    custody.save_job_id(&transaction_id, &response.job_id).map_err(|err| {
+    custody.save_job_id(&request_id, &response.job_id).map_err(|err| {
         tracing::error!("failed to save job_id: {}", err);
         CustodyServiceError::DataBaseWriteError
     })?;
@@ -152,8 +148,7 @@ pub async fn transfer<D: KeyValueDB>(
     tracing::info!("relayer returned the job id: {:#?}", response.job_id);
 
     Ok(HttpResponse::Ok().json(TransferResponse {
-        success: true,
-        transaction_id,
+        request_id,
     }))
 }
 
@@ -167,7 +162,7 @@ pub async fn transaction_status<D: KeyValueDB>(
         CustodyServiceError::CustodyLockError
     })?;
 
-    let transaction_id = &request.transaction_id;
+    let transaction_id = &request.request_id;
     let job_id = custody.get_job_by_request_id(transaction_id)?
         .ok_or(
             CustodyServiceError::TransactionNotFound
