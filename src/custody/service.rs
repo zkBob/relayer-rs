@@ -328,7 +328,7 @@ impl CustodyService {
         self.db.write(tx).map_err(|err| err.to_string())
     }
 
-    pub fn get_job_id(&self, transaction_id: &str) -> Result<Option<String>, CustodyServiceError> {
+    pub fn get_job_by_request_id(&self, transaction_id: &str) -> Result<Option<String>, CustodyServiceError> {
         self.db.get(CustodyDbColumn::JobsIndex.into(), transaction_id.as_bytes())
             .map_err(|err| {
                 tracing::error!("failed to get job id from database: {}", err);

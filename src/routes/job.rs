@@ -16,7 +16,7 @@ use super::ServiceError;
 #[serde(rename_all = "camelCase")]
 pub struct JobResponse {
     pub state: String,
-    pub tx_hash: Option<Vec<String>>,
+    pub tx_hash: Option<String>,
     pub failed_reason: Option<String>,
     pub created_on: u128,
     pub finished_on: u128,
@@ -55,7 +55,7 @@ pub async fn job<D: KeyValueDB>(
     };
 
     if job.transaction.is_some() {
-        response.tx_hash = Some(vec![format!("{:#x}", job.transaction.unwrap().hash)]);
+        response.tx_hash = Some(format!("{:#x}", job.transaction.unwrap().hash));
     }
 
     if job.status == JobStatus::Rejected {

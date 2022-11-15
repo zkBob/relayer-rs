@@ -10,7 +10,7 @@ use crate::{routes::job::JobResponse, state::State, types::job::Response, custod
 
 use super::{
     service::CustodyService,
-    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SyncResponse, SignupResponse, ListAccountsResponse, HistoryResponse, TransferStatusRequest, TransactionStatusResponse}, errors::CustodyServiceError,
+    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SignupResponse, ListAccountsResponse, TransferStatusRequest, TransactionStatusResponse}, errors::CustodyServiceError,
 };
 
 pub type Custody = Data<RwLock<CustodyService>>;
@@ -59,9 +59,8 @@ pub async fn signup<D: KeyValueDB>(
 
     let account_id = custody.new_account(request.0.description);
 
-    Ok(HttpResponse::Ok().json(SignupResponse{
-        success: true,
-        account_id: account_id.to_string()
+    Ok(HttpResponse::Ok().json(SignupResponse {
+        account_id: account_id.to_string(),
     }))
 }
 
@@ -81,10 +80,7 @@ pub async fn list_accounts<D: KeyValueDB>(
     
     let finalized = state.finalized.lock().unwrap();
 
-    Ok(HttpResponse::Ok().json(ListAccountsResponse{
-        success: true,
-        accounts: custody.list_accounts(finalized.next_index()
-    )}))
+    Ok(HttpResponse::Ok().json(custody.list_accounts(finalized.next_index())))
 }
 
 pub async fn transfer<D: KeyValueDB>(
@@ -93,21 +89,23 @@ pub async fn transfer<D: KeyValueDB>(
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let request: TransferRequest = request.0.into();
-    
+
     let account_id = Uuid::from_str(&request.account_id).map_err(|err| {
         tracing::error!("failed to parse account id: {}", err);
         CustodyServiceError::IncorrectAccountId
     })?;
-    
+
     let custody = custody.read().map_err(|_| {
         tracing::error!("failed to lock custody service");
         CustodyServiceError::CustodyLockError
     })?;
+
     
     custody.sync_account(account_id, &state)?;
 
+
     let transaction_id = request.id.clone();
-    if custody.get_job_id(&transaction_id)?.is_some() {
+    if custody.get_job_by_request_id(&transaction_id)?.is_some() {
         return Err(CustodyServiceError::DuplicateTransactionId);
     }
 
@@ -134,7 +132,7 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::RelayerSendError
     })?;
 
-    let response:Response = response.json().await.map_err(|e| {
+    let response: Response = response.json().await.map_err(|e| {
         tracing::error!("the relayer response was not JSON: {:#?}", e);
         CustodyServiceError::RelayerSendError
     })?;
@@ -151,11 +149,11 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::DataBaseWriteError
     })?;
 
-    tracing::info!("relayer returned the job id: {:#?}", response.job_id );
+    tracing::info!("relayer returned the job id: {:#?}", response.job_id);
 
-    Ok(HttpResponse::Ok().json(TransferResponse{
+    Ok(HttpResponse::Ok().json(TransferResponse {
         success: true,
-        transaction_id
+        transaction_id,
     }))
 }
 
@@ -170,7 +168,7 @@ pub async fn transaction_status<D: KeyValueDB>(
     })?;
 
     let transaction_id = &request.transaction_id;
-    let job_id = custody.get_job_id(transaction_id)?
+    let job_id = custody.get_job_by_request_id(transaction_id)?
         .ok_or(
             CustodyServiceError::TransactionNotFound
         )?;
@@ -193,11 +191,10 @@ pub async fn transaction_status<D: KeyValueDB>(
         tracing::error!("the relayer response was not JSON: {:#?}", e);
         CustodyServiceError::RelayerSendError
     })?;
-    
-    Ok(HttpResponse::Ok().json(TransactionStatusResponse{
-        success: true,
+
+    Ok(HttpResponse::Ok().json(TransactionStatusResponse {
         state: response.state,
-        tx_hash: response.tx_hash.map(|v| v[0].clone()),
+        tx_hash: response.tx_hash,
         failed_reason: response.failed_reason,
     }))
 }
@@ -219,10 +216,7 @@ pub async fn generate_shielded_address<D: KeyValueDB>(
     let account = custody.account(account_id)?;
     let address = account.generate_address();
 
-    Ok(HttpResponse::Ok().json(GenerateAddressResponse{
-        success: true,
-        address,
-    }))
+    Ok(HttpResponse::Ok().json(GenerateAddressResponse { address }))
 }
 
 pub async fn history<D: KeyValueDB>(
@@ -245,8 +239,5 @@ pub async fn history<D: KeyValueDB>(
     let account = custody.account(account_id)?;
     let txs = account.history(&state.pool, |nullifier: Vec<u8>| custody.get_transaction_id(nullifier)).await;
 
-    Ok(HttpResponse::Ok().json(HistoryResponse{
-        success: true,
-        txs 
-    }))
+    Ok(HttpResponse::Ok().json(txs))
 }
