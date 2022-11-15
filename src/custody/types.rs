@@ -40,7 +40,6 @@ pub struct AccountDetailedInfo {
 }
 
 pub enum HistoryDbColumn {
-    NullifierIndex,
     NotesIndex,
 }
 

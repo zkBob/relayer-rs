@@ -1,6 +1,5 @@
 use crate::{
     custody::{tx_parser::ParseResult, types::{HistoryDbColumn, HistoryRecord}},
-    routes::ServiceError,
     types::transaction_request::{Proof, TransactionRequest}, state::State,
 };
 use actix_web::web::Data;
@@ -19,13 +18,14 @@ use uuid::Uuid;
 use super::{
     account::Account,
     tx_parser::{self, IndexedTx, TxParser},
-    types::{AccountShortInfo, Fr, RelayerState, TransferRequest, AccountDetailedInfo}, config::CustodyServiceSettings,
+    types::{AccountShortInfo, Fr, RelayerState, TransferRequest, AccountDetailedInfo}, config::CustodyServiceSettings, errors::CustodyServiceError,
 };
 use libzkbob_rs::{client::{TokenAmount, TxOutput, TxType}, proof::prove_tx};
 use std::str::FromStr;
 
 pub enum CustodyDbColumn {
-    JobsIndex
+    JobsIndex,
+    NullifierIndex
 }
 
 impl Into<u32> for CustodyDbColumn {
@@ -64,7 +64,7 @@ impl CustodyService {
 
         let db = kvdb_rocksdb::Database::open(
             &DatabaseConfig {
-                columns: 1,
+                columns: 2,
                 ..Default::default()
             },
             &format!("{}/custody", &settings.db_path)
@@ -106,14 +106,10 @@ impl CustodyService {
     pub fn transfer(
         &self,
         request: TransferRequest
-    ) -> Result<TransactionRequest, ServiceError> {
+    ) -> Result<TransactionRequest, CustodyServiceError> {
 
         let account_id = Uuid::from_str(&request.account_id).unwrap();
-        let account = self
-            .accounts
-            .iter()
-            .find(|account| account.id == account_id)
-            .ok_or(ServiceError::BadRequest(String::from("account with such id doesn't exist")))?;
+        let account = self.account(account_id)?;
         let account = account.inner.read().unwrap();
 
         let fee = 100000000;
@@ -155,7 +151,7 @@ impl CustodyService {
         amount: u64,
         holder: String,
         params: &Parameters<Bn256>,
-    ) -> Result<TransactionRequest, ServiceError> {
+    ) -> Result<TransactionRequest, CustodyServiceError> {
         let account = self
             .accounts
             .iter()
@@ -242,7 +238,7 @@ impl CustodyService {
             .collect()
     }
 
-    pub fn sync_account<D: KeyValueDB>(&self, account_id: Uuid, relayer_state: RelayerState<D>) -> Result<(), ServiceError> {
+    pub fn sync_account<D: KeyValueDB>(&self, account_id: Uuid, relayer_state: &RelayerState<D>) -> Result<(), CustodyServiceError> {
         tracing::info!("starting sync for account {}", account_id);
         let account = self.account(account_id)?;
 
@@ -316,11 +312,11 @@ impl CustodyService {
         Ok(())
     }
 
-    pub fn account(&self, account_id: Uuid) -> Result<&Account, ServiceError> {
+    pub fn account(&self, account_id: Uuid) -> Result<&Account, CustodyServiceError> {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
-            .ok_or(ServiceError::AccountNotFound)
+            .ok_or(CustodyServiceError::AccountNotFound)
     }
 
     pub fn save_job_id(&self, transaction_id: &str, job_id: &str) -> Result<(), String> {
@@ -332,17 +328,39 @@ impl CustodyService {
         self.db.write(tx).map_err(|err| err.to_string())
     }
 
-    pub fn get_job_by_request_id(&self, transaction_id: &str) -> Result<Option<String>, ServiceError> {
+    pub fn get_job_by_request_id(&self, transaction_id: &str) -> Result<Option<String>, CustodyServiceError> {
         self.db.get(CustodyDbColumn::JobsIndex.into(), transaction_id.as_bytes())
-            .map_err(|_| {
-                ServiceError::InternalError
+            .map_err(|err| {
+                tracing::error!("failed to get job id from database: {}", err);
+                CustodyServiceError::DataBaseReadError
             })?
             .map(|id| {
                 String::from_utf8(id)
-                    .map_err(|_| {
-                        ServiceError::InternalError
+                    .map_err(|err| {
+                        tracing::error!("failed to parse job id from database: {}", err);
+                        CustodyServiceError::DataBaseReadError
                     })
             })
             .map_or(Ok(None), |v| v.map(Some))
+    }
+
+    pub fn save_nullifier(&self, transaction_id: &str, nullifier: Vec<u8>) -> Result<(), String> {
+        let tx = {
+            let mut tx = self.db.transaction();
+            tx.put(CustodyDbColumn::NullifierIndex.into(), &nullifier, transaction_id.as_bytes());
+            tx
+        };
+        self.db.write(tx).map_err(|err| err.to_string())
+    }
+
+    pub fn get_transaction_id(&self, nullifier: Vec<u8>) -> Result<String, String> {
+        let transaction_id = self.db.get(CustodyDbColumn::NullifierIndex.into(), &nullifier)
+            .map_err(|err| err.to_string())?
+            .ok_or("transaction id not found")?;
+
+        let transaction_id = String::from_utf8(transaction_id)
+            .map_err(|err| err.to_string())?;
+
+        Ok(transaction_id)
     }
 }

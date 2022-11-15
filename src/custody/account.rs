@@ -1,8 +1,10 @@
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
 use libzeropool::POOL_PARAMS;
+use libzeropool::fawkes_crypto::rand::Rng;
 use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
 use libzkbob_rs::address;
+use libzkbob_rs::random::CustomRng;
 use libzkbob_rs::{
     client::{state::State, UserAccount as NativeUserAccount},
     merkle::MerkleTree,
@@ -83,27 +85,14 @@ impl Account {
         inner.keys.sk
     }
 
-    pub fn save_nullifier(&self, transaction_id: &str, nullifier: Vec<u8>) -> Result<(), String> {
-        let tx = {
-            let mut tx = self.history.transaction();
-            tx.put(HistoryDbColumn::NullifierIndex.into(), &nullifier, transaction_id.as_bytes());
-            tx
-        };
-        self.history.write(tx).map_err(|err| err.to_string())
+    pub fn generate_address(&self) -> String {
+        let inner = self.inner.read().unwrap();
+        inner.generate_address()
     }
 
-    pub fn get_transaction_id(&self, nullifier: Vec<u8>) -> Result<String, String> {
-        let transaction_id = self.history.get(HistoryDbColumn::NullifierIndex.into(), &nullifier)
-            .map_err(|err| err.to_string())?
-            .ok_or("transaction id not found")?;
-
-        let transaction_id = String::from_utf8(transaction_id)
-            .map_err(|err| err.to_string())?;
-
-        Ok(transaction_id)
-    }
-
-    pub async fn history(&self, pool: &Pool) -> Vec<HistoryTx> {
+    pub async fn history<F>(&self, pool: &Pool, get_transaction_id: F) -> Vec<HistoryTx> 
+        where F: Fn(Vec<u8>) -> Result<String, String> 
+    {
         let mut history = vec![];
         for (_, value) in self.history.iter(HistoryDbColumn::NotesIndex.into()) {
             let tx: HistoryRecord = serde_json::from_slice(&value).unwrap();
@@ -147,7 +136,7 @@ impl Account {
                 }
             };
 
-            let transaction_id = self.get_transaction_id(nullifier).ok();
+            let transaction_id = get_transaction_id(nullifier).ok();
             
             let timestamp = pool.block_timestamp(tx.block_num).await.unwrap();
             history.push(HistoryTx {
@@ -179,10 +168,8 @@ impl Account {
             .unwrap(),
         );
 
-        //"increase dial aisle hedgehog tree genre replace deliver boat tower furnace image"
-        let dummy_sk =
-            hex::decode("e0f3b09c27af2986df5c4157dc54e7b43d73748ccf2568e2ea21f2037b887800")
-                .unwrap();
+        let mut rng = CustomRng;
+        let sk: [u8; 32] = rng.gen();
 
         let account_db = kvdb_rocksdb::Database::open(
             &DatabaseConfig {
@@ -196,20 +183,20 @@ impl Account {
         account_db.write(
             {
                 let mut tx = account_db.transaction();
-                tx.put(0, "sk".as_bytes(), &dummy_sk);
+                tx.put(0, "sk".as_bytes(), &sk);
                 tx.put(0, "description".as_bytes(), description.as_bytes());
                 tx
             }
         ).unwrap();
 
-        let user_account = NativeUserAccount::from_seed(&dummy_sk, state, POOL_PARAMS.clone());
+        let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
         Self {
             inner: RwLock::new(user_account),
             id,
             description,
             history: kvdb_rocksdb::Database::open(
                 &DatabaseConfig {
-                    columns: 2,
+                    columns: 1,
                     ..Default::default()
                 },
                 &data_file_path(base_path, id, DataType::History)
@@ -255,7 +242,7 @@ impl Account {
             description,
             history: kvdb_rocksdb::Database::open(
                 &DatabaseConfig {
-                    columns: 2,
+                    columns: 1,
                     ..Default::default()
                 },
                 &data_file_path(base_path, id, DataType::History)
