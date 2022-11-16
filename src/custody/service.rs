@@ -1,6 +1,14 @@
 use crate::{
-    custody::{tx_parser::ParseResult, types::{HistoryDbColumn, HistoryRecord}},
-    types::transaction_request::{Proof, TransactionRequest}, state::State,
+    custody::{
+        tx_parser::ParseResult,
+        types::{HistoryDbColumn, HistoryRecord},
+    },
+    helpers::BytesRepr,
+    state::State,
+    types::{
+        job::Response,
+        transaction_request::{Proof, TransactionRequest},
+    },
 };
 use actix_web::web::Data;
 use kvdb::KeyValueDB;
@@ -12,20 +20,30 @@ use libzeropool::{
     fawkes_crypto::{backend::bellman_groth16::prover::prove, ff_uint::Num},
 };
 use memo_parser::memo::TxType as MemoTxType;
-use std::{time::{SystemTime, Duration}, fs, thread};
+use serde::{Serialize, Deserialize};
+use std::{
+    fs, thread,
+    time::{Duration, SystemTime},
+};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use uuid::Uuid;
 
 use super::{
     account::Account,
+    config::CustodyServiceSettings,
+    errors::CustodyServiceError,
     tx_parser::{self, IndexedTx, TxParser},
-    types::{AccountShortInfo, Fr, RelayerState, TransferRequest, AccountDetailedInfo}, config::CustodyServiceSettings, errors::CustodyServiceError,
+    types::{AccountDetailedInfo, AccountShortInfo, Fr, RelayerState, TransferRequest},
 };
-use libzkbob_rs::{client::{TokenAmount, TxOutput, TxType}, proof::prove_tx};
+use libzkbob_rs::{
+    client::{TokenAmount, TxOutput, TxType},
+    proof::prove_tx,
+};
 use std::str::FromStr;
 
 pub enum CustodyDbColumn {
     JobsIndex,
-    NullifierIndex
+    NullifierIndex,
 }
 
 impl Into<u32> for CustodyDbColumn {
@@ -39,10 +57,96 @@ pub struct CustodyService {
     pub accounts: Vec<Account>,
     pub params: Parameters<Bn256>,
     pub db: kvdb_rocksdb::Database,
+    pub sender: Sender<TransferRequest>,
+    pub receiver: Receiver<TransferRequest>,
 }
 
+#[derive(Serialize,Deserialize)]
+pub enum TransferStatus {
+    New,
+    Proving,
+    Relaying,
+    Mining,
+    Done,
+    Failed
+}
+
+
+#[derive(Serialize, Deserialize)]
+pub struct JobShortInfo {
+    // request_id: String,
+    job_id: Option<Vec<u8>>,
+    status: TransferStatus
+
+}
 impl CustodyService {
-    pub fn new<D: KeyValueDB>(params: Parameters<Bn256>, settings: CustodyServiceSettings, state: Data<State<D>>) -> Self {
+    pub fn start_request_processing(mut self) {
+        tokio::task::spawn(async move {
+            tracing::info!("starting tx_sender...");
+
+            while let Some(request) = self.receiver.recv().await {
+                match self.process_transfer_request(request).await {
+                    Ok(_) => todo!(),
+                    Err(e) => tracing::debug!("failed to process transfer request /n/t{:#?}", e),
+                }
+            }
+        });
+    }
+
+    pub async fn process_transfer_request(
+        &self,
+        request: TransferRequest,
+    ) -> Result<(), CustodyServiceError> {
+        let request_id = request.request_id.as_ref().unwrap().clone();
+        let transaction_request = vec![self.transfer(request)?];
+
+        let relayer_endpoint = format!("{}/sendTransactions", self.settings.relayer_url);
+
+        let response = reqwest::Client::new()
+            .post(relayer_endpoint)
+            .json(&transaction_request)
+            .header("Content-type", "application/json")
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    "network exception when sending request to relayer: {:#?}",
+                    e
+                );
+                CustodyServiceError::RelayerSendError
+            })?;
+
+        let response = response.error_for_status().map_err(|e| {
+            tracing::error!("relayer returned bad status code {:#?}", e);
+            CustodyServiceError::RelayerSendError
+        })?;
+
+        let response: Response = response.json().await.map_err(|e| {
+            tracing::error!("the relayer response was not JSON: {:#?}", e);
+            CustodyServiceError::RelayerSendError
+        })?;
+
+        // TODO: multitransfer
+        let nullifier = transaction_request[0].proof.inputs[1].bytes();
+        self.save_nullifier(&request_id, nullifier).map_err(|err| {
+            tracing::error!("failed to save nullifier: {}", err);
+            CustodyServiceError::DataBaseWriteError
+        })?;
+
+        self.update_request_status(&request_id, Some(&response.job_id.into_bytes()), TransferStatus::Relaying)
+            .map_err(|err| {
+                tracing::error!("failed to save job_id: {}", err);
+                CustodyServiceError::DataBaseWriteError
+            })?;
+
+        tracing::info!("relayer returned the job id: {:#?}", response.job_id);
+        Ok(())
+    }
+    pub fn new<D: KeyValueDB>(
+        params: Parameters<Bn256>,
+        settings: CustodyServiceSettings,
+        state: Data<State<D>>,
+    ) -> Self {
         let base_path = format!("{}/accounts_data", &settings.db_path);
         let mut accounts = vec![];
 
@@ -54,10 +158,10 @@ impl CustodyService {
                     if path.file_type().unwrap().is_dir() {
                         let account_id = path.file_name();
                         let account_id = account_id.to_str().unwrap();
-                        tracing::info!("Loading: {}", account_id); 
+                        tracing::info!("Loading: {}", account_id);
                         let account = Account::load(&base_path, account_id).unwrap();
                         accounts.push(account);
-                    }   
+                    }
                 }
             }
         }
@@ -67,7 +171,7 @@ impl CustodyService {
                 columns: 2,
                 ..Default::default()
             },
-            &format!("{}/custody", &settings.db_path)
+            &format!("{}/custody", &settings.db_path),
         )
         .unwrap();
 
@@ -80,8 +184,17 @@ impl CustodyService {
                 thread::sleep(sync_interval);
             }
         });
-        
-        Self { accounts, settings, params, db }
+
+        let (sender, mut receiver) = mpsc::channel::<TransferRequest>(100);
+
+        Self {
+            accounts,
+            settings,
+            params,
+            db,
+            sender,
+            receiver,
+        }
     }
 
     pub fn new_account(&mut self, description: String) -> Uuid {
@@ -105,9 +218,8 @@ impl CustodyService {
 
     pub fn transfer(
         &self,
-        request: TransferRequest
+        request: TransferRequest,
     ) -> Result<TransactionRequest, CustodyServiceError> {
-
         let account_id = Uuid::from_str(&request.account_id).unwrap();
         let account = self.account(account_id)?;
         let account = account.inner.read().unwrap();
@@ -123,16 +235,13 @@ impl CustodyService {
 
         let tx = account.create_tx(transfer, None, None).unwrap();
         let (inputs, proof) = prove_tx(
-            &self.params, 
-            &*libzeropool::POOL_PARAMS, 
-            tx.public, 
+            &self.params,
+            &*libzeropool::POOL_PARAMS,
+            tx.public,
             tx.secret,
         );
 
-        let proof = Proof {
-            inputs,
-            proof,
-        };
+        let proof = Proof { inputs, proof };
 
         let tx_request = TransactionRequest {
             uuid: Some(Uuid::new_v4().to_string()),
@@ -141,7 +250,7 @@ impl CustodyService {
             tx_type: format!("{:0>4}", MemoTxType::Transfer.to_u32()),
             deposit_signature: None,
         };
-        
+
         Ok(tx_request)
     }
 
@@ -200,10 +309,7 @@ impl CustodyService {
         Ok(tx_request)
     }
 
-    pub fn account_info(
-        &self,
-        account_id: Uuid
-    ) -> Option<AccountShortInfo> {
+    pub fn account_info(&self, account_id: Uuid) -> Option<AccountShortInfo> {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
@@ -211,13 +317,14 @@ impl CustodyService {
     }
 
     pub fn list_accounts(&self) -> Vec<AccountShortInfo> {
-        self.accounts
-            .iter()
-            .map(Account::short_info)
-            .collect()
+        self.accounts.iter().map(Account::short_info).collect()
     }
 
-    pub fn sync_account<D: KeyValueDB>(&self, account_id: Uuid, relayer_state: &RelayerState<D>) -> Result<(), CustodyServiceError> {
+    pub fn sync_account<D: KeyValueDB>(
+        &self,
+        account_id: Uuid,
+        relayer_state: &RelayerState<D>,
+    ) -> Result<(), CustodyServiceError> {
         tracing::info!("starting sync for account {}", account_id);
         let account = self.account(account_id)?;
 
@@ -233,7 +340,7 @@ impl CustodyService {
             start_index,
             finalized_index
         );
-        
+
         // TODO: error instead of unwrap
         let jobs = relayer_state
             .get_jobs(start_index, finalized_index)
@@ -252,8 +359,7 @@ impl CustodyService {
 
         tracing::info!("jobs to sync {:#?}", job_indices);
 
-        let parse_result: ParseResult =
-            TxParser::new().parse_native_tx(account.sk(), indexed_txs);
+        let parse_result: ParseResult = TxParser::new().parse_native_tx(account.sk(), indexed_txs);
 
         tracing::info!(
             "retrieved new_accounts: {:#?} \n new notes: {:#?}",
@@ -264,15 +370,15 @@ impl CustodyService {
 
         let mut batch = account.history.transaction();
         decrypted_memos.iter().for_each(|memo| {
-            let jobs = relayer_state.get_jobs(memo.index, 1).unwrap(); 
+            let jobs = relayer_state.get_jobs(memo.index, 1).unwrap();
             let job = jobs.first().unwrap();
             let tx = job.transaction.as_ref().unwrap();
-            
+
             let record = HistoryRecord {
                 dec_memo: memo.clone(),
                 tx_hash: tx.hash,
                 calldata: tx.input.0.clone(),
-                block_num: tx.block_number.unwrap()
+                block_num: tx.block_number.unwrap(),
             };
 
             batch.put_vec(
@@ -298,48 +404,63 @@ impl CustodyService {
             .ok_or(CustodyServiceError::AccountNotFound)
     }
 
-    pub fn save_job_id(&self, transaction_id: &str, job_id: &str) -> Result<(), String> {
+    pub fn update_request_status(&self, request_id: &str, job_id: Option<Vec<u8>>, status:TransferStatus ) -> Result<(), String> {
         let tx = {
             let mut tx = self.db.transaction();
-            tx.put(CustodyDbColumn::JobsIndex.into(), transaction_id.as_bytes(), job_id.as_bytes());
+            tx.put(
+                CustodyDbColumn::JobsIndex.into(),
+                request_id.as_bytes(),
+                &serde_json::to_vec(&JobShortInfo {
+                    job_id,
+                    status
+                }).unwrap(),
+            );
             tx
         };
         self.db.write(tx).map_err(|err| err.to_string())
     }
 
-    pub fn get_job_by_request_id(&self, transaction_id: &str) -> Result<Option<String>, CustodyServiceError> {
-        self.db.get(CustodyDbColumn::JobsIndex.into(), transaction_id.as_bytes())
+    pub fn get_job_id_by_request_id(
+        &self,
+        request_id: &str,
+    ) -> Result<Option<String>, CustodyServiceError> {
+        self.db
+            .get(CustodyDbColumn::JobsIndex.into(), request_id.as_bytes())
             .map_err(|err| {
                 tracing::error!("failed to get job id from database: {}", err);
                 CustodyServiceError::DataBaseReadError
             })?
             .map(|id| {
-                String::from_utf8(id)
-                    .map_err(|err| {
-                        tracing::error!("failed to parse job id from database: {}", err);
-                        CustodyServiceError::DataBaseReadError
-                    })
+                String::from_utf8(id).map_err(|err| {
+                    tracing::error!("failed to parse job id from database: {}", err);
+                    CustodyServiceError::DataBaseReadError
+                })
             })
             .map_or(Ok(None), |v| v.map(Some))
     }
 
-    pub fn save_nullifier(&self, transaction_id: &str, nullifier: Vec<u8>) -> Result<(), String> {
+    pub fn save_nullifier(&self, request_id: &str, nullifier: Vec<u8>) -> Result<(), String> {
         let tx = {
             let mut tx = self.db.transaction();
-            tx.put(CustodyDbColumn::NullifierIndex.into(), &nullifier, transaction_id.as_bytes());
+            tx.put(
+                CustodyDbColumn::NullifierIndex.into(),
+                &nullifier,
+                request_id.as_bytes(),
+            );
             tx
         };
         self.db.write(tx).map_err(|err| err.to_string())
     }
 
-    pub fn get_transaction_id(&self, nullifier: Vec<u8>) -> Result<String, String> {
-        let transaction_id = self.db.get(CustodyDbColumn::NullifierIndex.into(), &nullifier)
+    pub fn get_request_id(&self, nullifier: Vec<u8>) -> Result<String, String> {
+        let request_id = self
+            .db
+            .get(CustodyDbColumn::NullifierIndex.into(), &nullifier)
             .map_err(|err| err.to_string())?
             .ok_or("transaction id not found")?;
 
-        let transaction_id = String::from_utf8(transaction_id)
-            .map_err(|err| err.to_string())?;
+        let request_id = String::from_utf8(request_id).map_err(|err| err.to_string())?;
 
-        Ok(transaction_id)
+        Ok(request_id)
     }
 }

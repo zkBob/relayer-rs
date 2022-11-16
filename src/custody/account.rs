@@ -129,7 +129,7 @@ impl Account {
                             let amount = note.b.to_num();
                             let address = address::format_address::<PoolParams>(note.d, note.p_d);
                             (
-                                HistoryTxType::TransferLoopback,
+                                HistoryTxType::ReturnedChange,
                                 amount.to_string(),
                                 Some(address),
                             )

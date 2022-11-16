@@ -81,13 +81,14 @@ pub struct AccountInfoRequest {
     pub id: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize,Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferRequest {
     pub request_id: Option<String>,
     pub account_id: String,
     pub amount:u64,
     pub to: String,
+    pub webhook: Option<String>
 }
 
 #[derive(Serialize)]
@@ -114,7 +115,7 @@ pub enum HistoryTxType {
     Withdrawal,
     TransferIn,
     TransferOut,
-    TransferLoopback,
+    ReturnedChange,
 }
 
 #[derive(Serialize)]
