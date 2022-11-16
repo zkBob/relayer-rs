@@ -20,7 +20,7 @@ use libzeropool::{
     fawkes_crypto::{backend::bellman_groth16::prover::prove, ff_uint::Num},
 };
 use memo_parser::memo::TxType as MemoTxType;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::{
     fs, thread,
     time::{Duration, SystemTime},
@@ -61,23 +61,21 @@ pub struct CustodyService {
     pub receiver: Receiver<TransferRequest>,
 }
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub enum TransferStatus {
     New,
     Proving,
     Relaying,
     Mining,
     Done,
-    Failed
+    Failed(String),
 }
-
 
 #[derive(Serialize, Deserialize)]
 pub struct JobShortInfo {
     // request_id: String,
     job_id: Option<Vec<u8>>,
-    status: TransferStatus
-
+    status: TransferStatus,
 }
 impl CustodyService {
     pub fn start_request_processing(mut self) {
@@ -85,9 +83,17 @@ impl CustodyService {
             tracing::info!("starting tx_sender...");
 
             while let Some(request) = self.receiver.recv().await {
+                let request_id = request.clone().request_id.unwrap();
                 match self.process_transfer_request(request).await {
-                    Ok(_) => todo!(),
-                    Err(e) => tracing::debug!("failed to process transfer request /n/t{:#?}", e),
+                    Ok(job_id) => self.update_request_status(
+                        &request_id,
+                        Some(job_id.into_bytes()),
+                        TransferStatus::Mining,
+                    ).unwrap(),
+                    Err(e) => {
+                        tracing::debug!("failed to process transfer request /n/t{:#?}", e);
+                        //TODO: update to failed
+                    },
                 }
             }
         });
@@ -96,7 +102,7 @@ impl CustodyService {
     pub async fn process_transfer_request(
         &self,
         request: TransferRequest,
-    ) -> Result<(), CustodyServiceError> {
+    ) -> Result<String, CustodyServiceError> {
         let request_id = request.request_id.as_ref().unwrap().clone();
         let transaction_request = vec![self.transfer(request)?];
 
@@ -130,17 +136,22 @@ impl CustodyService {
         let nullifier = transaction_request[0].proof.inputs[1].bytes();
         self.save_nullifier(&request_id, nullifier).map_err(|err| {
             tracing::error!("failed to save nullifier: {}", err);
-            CustodyServiceError::DataBaseWriteError
+            CustodyServiceError::DataBaseWriteError(err.to_string())
         })?;
 
-        self.update_request_status(&request_id, Some(&response.job_id.into_bytes()), TransferStatus::Relaying)
-            .map_err(|err| {
-                tracing::error!("failed to save job_id: {}", err);
-                CustodyServiceError::DataBaseWriteError
-            })?;
-
         tracing::info!("relayer returned the job id: {:#?}", response.job_id);
-        Ok(())
+        let job_id = response.job_id.clone();
+        self.update_request_status(
+            &request_id,
+            Some(job_id.into_bytes()),
+            TransferStatus::Relaying,
+        )
+        .map_err(|err| {
+            tracing::error!("failed to save job_id: {}", err);
+            CustodyServiceError::DataBaseWriteError(err.to_string())
+        })?;
+
+        Ok(response.job_id)
     }
     pub fn new<D: KeyValueDB>(
         params: Parameters<Bn256>,
@@ -404,20 +415,24 @@ impl CustodyService {
             .ok_or(CustodyServiceError::AccountNotFound)
     }
 
-    pub fn update_request_status(&self, request_id: &str, job_id: Option<Vec<u8>>, status:TransferStatus ) -> Result<(), String> {
+    pub fn update_request_status(
+        &self,
+        request_id: &str,
+        job_id: Option<Vec<u8>>,
+        status: TransferStatus,
+    ) -> Result<(), CustodyServiceError> {
         let tx = {
             let mut tx = self.db.transaction();
             tx.put(
                 CustodyDbColumn::JobsIndex.into(),
                 request_id.as_bytes(),
-                &serde_json::to_vec(&JobShortInfo {
-                    job_id,
-                    status
-                }).unwrap(),
+                &serde_json::to_vec(&JobShortInfo { job_id, status }).unwrap(),
             );
             tx
         };
-        self.db.write(tx).map_err(|err| err.to_string())
+        self.db
+            .write(tx)
+            .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))
     }
 
     pub fn get_job_id_by_request_id(

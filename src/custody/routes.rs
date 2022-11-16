@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     errors::CustodyServiceError,
-    service::CustodyService,
+    service::{CustodyService, TransferStatus},
     types::{
         AccountInfoRequest, GenerateAddressResponse, ListAccountsResponse, SignupRequest,
         SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest,
@@ -114,15 +114,26 @@ pub async fn transfer<D: KeyValueDB>(
 
     request.request_id = Some(request_id.clone());
 
+    custody.update_request_status(&request_id, None, TransferStatus::New)?;
+
     custody
         .sender
         .send(request)
         .await
-        .map_err(|e| CustodyServiceError::CustodyLockError);
+        .map_err(|e| {
+            tracing::error!("failed to send request to prover: {:#?}", e);
+            custody.update_request_status(&request_id, None, TransferStatus::Failed(e.to_string())).unwrap();
+            CustodyServiceError::RelayerSendError
+        })
+        .and_then(|()| {
+            custody.update_request_status(&request_id, None, TransferStatus::Proving)
+        })
+        .map(|()| {            
+            HttpResponse::Ok().json(TransferResponse {
+                request_id: request_id.clone(),
+            })
+        })
 
-    Ok(HttpResponse::Ok().json(TransferResponse {
-        request_id: request_id.clone(),
-    }))
 }
 
 pub async fn transaction_status<D: KeyValueDB>(
