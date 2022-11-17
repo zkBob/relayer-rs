@@ -6,17 +6,14 @@ use kvdb::KeyValueDB;
 use std::{str::FromStr, sync::RwLock};
 use uuid::Uuid;
 
-use crate::{
-    custody::types::TransferResponse, helpers::BytesRepr, routes::job::JobResponse, state::State,
-    types::job::Response,
-};
+use crate::{custody::types::TransferResponse, routes::job::JobResponse, state::State};
 
 use super::{
     errors::CustodyServiceError,
     service::{CustodyService, TransferStatus},
     types::{
-        AccountInfoRequest, GenerateAddressResponse, ListAccountsResponse, SignupRequest,
-        SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest,
+        AccountInfoRequest, GenerateAddressResponse, ScheduledTask, SignupRequest, SignupResponse,
+        TransactionStatusResponse, TransferRequest, TransferStatusRequest,
     },
 };
 
@@ -90,7 +87,7 @@ pub async fn transfer<D: KeyValueDB>(
     state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
-    let mut request: TransferRequest = request.0.into();
+    let request: TransferRequest = request.0.into();
 
     let account_id = Uuid::from_str(&request.account_id).map_err(|err| {
         tracing::error!("failed to parse account id: {}", err);
@@ -112,47 +109,37 @@ pub async fn transfer<D: KeyValueDB>(
         return Err(CustodyServiceError::DuplicateTransactionId);
     }
 
-    request.request_id = Some(request_id.clone());
+    // request.request_id = Some(request_id.clone());
 
-    custody.update_request_status(&request_id, None, TransferStatus::New)?;
+    let task = ScheduledTask {
+        request_id: request_id.clone(),
+        request,
+        job_id: None,
+        endpoint: None,
+        retries_left: 42,
+        status: TransferStatus::Proving,
+        tx_hash: None,
+        failure_reason: None
+    };
+
+    // custody.update_task_status(task.clone(), TransferStatus::New).await?;
 
     custody
         .sender
-        .send(request)
-        .await
-        .map_err(|e| {
-            tracing::error!("failed to send request to prover: {:#?}", e);
-            custody.update_request_status(&request_id, None, TransferStatus::Failed(e.to_string())).unwrap();
-            CustodyServiceError::RelayerSendError
-        })
-        .and_then(|()| {
-            custody.update_request_status(&request_id, None, TransferStatus::Proving)
-        })
-        .map(|()| {            
+        .send(task.clone())
+        .await.unwrap();
+        
+        custody.update_task_status(task.clone(), TransferStatus::Proving).await
+        .map(|()| {
             HttpResponse::Ok().json(TransferResponse {
                 request_id: request_id.clone(),
             })
         })
-
 }
 
-pub async fn transaction_status<D: KeyValueDB>(
-    request: Query<TransferStatusRequest>,
-    _: Data<State<D>>,
-    custody: Custody,
-) -> Result<HttpResponse, CustodyServiceError> {
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
-
-    let transaction_id = &request.request_id;
-    let job_id = custody
-        .get_job_id_by_request_id(transaction_id)?
-        .ok_or(CustodyServiceError::TransactionNotFound)?;
-
-    let relayer_endpoint = format!("{}/job/{}", custody.settings.relayer_url, job_id);
-
+pub async fn fetch_tx_status(
+    relayer_endpoint: &str,
+) -> Result<TransactionStatusResponse, CustodyServiceError> {
     let response = reqwest::Client::new()
         .get(relayer_endpoint)
         .send()
@@ -170,11 +157,26 @@ pub async fn transaction_status<D: KeyValueDB>(
         CustodyServiceError::RelayerSendError
     })?;
 
-    Ok(HttpResponse::Ok().json(TransactionStatusResponse {
-        state: response.state,
+    Ok(TransactionStatusResponse {
+        status:  TransferStatus::from(response.state),
         tx_hash: response.tx_hash,
-        failed_reason: response.failed_reason,
-    }))
+        failure_reason: response.failed_reason,
+    })
+}
+pub async fn transaction_status<D: KeyValueDB>(
+    request: Query<TransferStatusRequest>,
+    _: Data<State<D>>,
+    custody: Custody,
+) -> Result<HttpResponse, CustodyServiceError> {
+    let custody = custody.read().map_err(|_| {
+        tracing::error!("failed to lock custody service");
+        CustodyServiceError::CustodyLockError
+    })?;
+
+    let relayer_endpoint = custody.relayer_endpoint(request.0.request_id)?;
+    let transaction_status = fetch_tx_status(&relayer_endpoint).await?;
+
+    Ok(HttpResponse::Ok().json(transaction_status))
 }
 
 pub async fn generate_shielded_address<D: KeyValueDB>(

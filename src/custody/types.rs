@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use libzkbob_rs::libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait};
 
-use super::tx_parser::DecMemo;
+use super::{tx_parser::DecMemo, service::TransferStatus};
 
 #[derive(Serialize)]
 pub struct AccountShortInfo {
@@ -88,7 +88,20 @@ pub struct TransferRequest {
     pub account_id: String,
     pub amount:u64,
     pub to: String,
+    
     pub webhook: Option<String>
+    
+}
+#[derive(Deserialize,Debug, Clone)]
+pub struct ScheduledTask {
+    pub request_id: String,
+    pub request : TransferRequest,
+    pub job_id: Option<Vec<u8>>,
+    pub endpoint: Option<String>,
+    pub retries_left: u8,
+    pub status: TransferStatus,
+    pub tx_hash: Option<String>,
+    pub failure_reason: Option<String>
 }
 
 #[derive(Serialize)]
@@ -156,11 +169,11 @@ pub struct TransferStatusRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionStatusResponse {
-    pub state: String,
+    pub status: TransferStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub failed_reason: Option<String>,
+    pub failure_reason: Option<String>,
 }
 
 

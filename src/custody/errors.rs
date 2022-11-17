@@ -1,9 +1,9 @@
 use actix_http::StatusCode;
 use actix_web::{http::header::ContentType, HttpResponse, ResponseError};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Clone, Serialize,Deserialize, Debug, Error)]
 pub enum CustodyServiceError {
     #[error("request malformed")]
     BadRequest(String),
@@ -25,6 +25,12 @@ pub enum CustodyServiceError {
     RelayerSendError,
     #[error("request not found")]
     TransactionNotFound,
+    #[error("general error occured:'{0}'")]
+    InternalError(String),
+    #[error("retries exhausted")]
+    RetriesExhausted,
+    #[error("relayer returned error: '{0}'")]
+    TaskRejectedByRelayer(String),
 }
 
 
