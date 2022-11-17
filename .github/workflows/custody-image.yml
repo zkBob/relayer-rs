@@ -1,0 +1,31 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "custody_image" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - uses: webfactory/ssh-agent@v0.5.4
+      with:
+        ssh-private-key: ${{ secrets.PHASE2_BN256_SSH_KEY }}
+    
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - uses: Swatinem/rust-cache@v1
+
+    - name: "Build relayer-rs binary"
+      run: cargo build --release
+    
+    - name: Build the Docker image
+      run: docker build . --tag zkbob-cloud:$(date +%s)
