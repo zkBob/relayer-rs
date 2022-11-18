@@ -24,8 +24,5 @@ jobs:
     
     - uses: Swatinem/rust-cache@v1
 
-    - name: "Build relayer-rs binary"
-      run: cargo build --release
-    
-    - name: Build the Docker image
-      run: docker build . --tag zkbob-cloud:$(date +%s)
+    - name: "Build Docker"
+      run: ./scripts/build-docker.sh
