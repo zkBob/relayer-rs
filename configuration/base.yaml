@@ -1,6 +1,9 @@
 application:
   host: 127.0.0.1
   port: 8000
+  telemetry:
+    kind: Stdout
+    log_level: DEBUG
   tx:
     vk: tests/data/params/transfer_verification_key.json
     params: tests/data/params/transfer_params.bin

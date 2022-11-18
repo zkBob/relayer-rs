@@ -1,12 +1,14 @@
-use std::sync::Mutex;
-
 use relayer_rs::{
     configuration::get_config,
     contracts::Pool,
     startup::Application,
     telemetry::{get_subscriber, init_subscriber},
     tx_checker, tx_sender, types::job::Job,
+    configuration::get_config, contracts::Pool, startup::Application, state::Job,
+    telemetry::setup_telemetry, tx_checker, tx_sender,
 };
+use tracing::Instrument;
+use std::sync::Mutex;
 
 use libzeropool::POOL_PARAMS;
 use libzkbob_rs::merkle::MerkleTree;
@@ -18,13 +20,9 @@ use kvdb_rocksdb::{Database, DatabaseConfig};
 
 #[actix_web::main]
 async fn main() -> Result<(), std::io::Error> {
-    init_subscriber(get_subscriber(
-        "relayer".into(),
-        "trace".into(),
-        std::io::stdout,
-    ));
-
     let configuration = get_config().expect("failed to get configuration");
+
+    setup_telemetry(&configuration);
 
     let (sender, receiver) = mpsc::channel::<Job>(1000);
 
@@ -59,10 +57,19 @@ async fn main() -> Result<(), std::io::Error> {
     )
     .await?;
 
-    app.state.sync().await.expect("failed to sync");
-
     tx_sender::start(&app.state, receiver, tree_params, pool);
     tx_checker::start(&app.state);
+
+    
+    app.state
+    .sync()
+    .instrument(tracing::debug_span!("state sync"))
+    .await
+    .map_err(|e| {
+        tracing::error!("sync failed:\n\t{:#?}", e);
+        e
+    })
+    .unwrap();
 
     app.run_untill_stopped().await
 }

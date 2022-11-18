@@ -15,6 +15,12 @@ use crate::{
     routes::{self, wallet_screening},
     state::State,
 };
+// use opentelemetry::{
+//     sdk::export::trace::
+// };
+use crate::{routes, state::State};
+use actix_web_opentelemetry::RequestTracing;
+
 
 pub fn run<D: 'static + KeyValueDB>(
     listener: TcpListener,
@@ -24,6 +30,7 @@ pub fn run<D: 'static + KeyValueDB>(
     tracing::info!("starting webserver");
 
     let server = HttpServer::new(move || {
+
         let cors = Cors::default()
             .allow_any_origin()
             .allowed_methods(vec!["GET", "POST"])
@@ -32,6 +39,7 @@ pub fn run<D: 'static + KeyValueDB>(
 
         App::new()
             .wrap(cors)
+            .wrap(RequestTracing::new())
             .wrap(middleware::Logger::default())
             .route("/tx", web::get().to(routes::query))
             .route("/info", web::get().to(routes::info::<D>))

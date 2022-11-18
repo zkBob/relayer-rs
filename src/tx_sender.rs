@@ -3,7 +3,7 @@ use kvdb::KeyValueDB;
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
 use tokio::{sync::mpsc::{Receiver, error::TryRecvError}, task};
 use web3::types::Transaction;
-
+use tracing_futures::Instrument;
 use crate::{
     contracts::Pool,
     state::{JobsDbColumn, State},
@@ -34,7 +34,10 @@ pub async fn receive_one<D: KeyValueDB>(
 ) {
 
     match  receiver.try_recv()  {
-        Ok(job) => process_job(job, state, &tree_params, &pool).await,
+        Ok(job) => {
+            let span = tracing::debug_span!("processing new message from channel", id = job.id);
+            process_job(job, state, &tree_params, &pool).instrument(span).await
+        },
         Err(TryRecvError::Empty) => tracing::error!("WTF NO MESSAGE"),
         Err(error) => tracing::error!("{:#?}" ,error)
     };
@@ -63,7 +66,8 @@ pub async fn process_job<D: KeyValueDB>(
         hex::encode(&tx_data)
     );
 
-    match pool.send_tx(tx_data).await {
+    let span = tracing::debug_span!("sending transaction to contract", id = job.id);
+    match pool.send_tx(tx_data).instrument(span).await {
         Ok(tx_hash) => {
             tracing::info!("[Job: {}] Received tx hash: {:#x}", job.id, tx_hash);
 
