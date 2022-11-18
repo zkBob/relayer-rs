@@ -7,3 +7,4 @@ tests/js_test/node_modules
 tests/data/params/*
 data/params
 accounts_data
+params

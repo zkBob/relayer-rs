@@ -18,7 +18,6 @@ use crate::{
 // use opentelemetry::{
 //     sdk::export::trace::
 // };
-use crate::{routes, state::State};
 use actix_web_opentelemetry::RequestTracing;
 
 
