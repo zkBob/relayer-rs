@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  zkbob-cloud:
+    image: zkbob-cloud:latest
+    container_name: zkbob-cloud
+    volumes: 
+      - ../params:/app/params/
+      - ../configuration:/app/configuration
+    environment:
+      APP_ENVIRONMENT: 'docker'
+      RUST_LOG: "info"
+      RUST_BACKTRACE: 1
+    ports:
+      - 8001:8001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

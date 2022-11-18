@@ -8,3 +8,4 @@ tests/data/params/*
 data/params
 accounts_data
 params
+docker/relayer-rs
