@@ -9,6 +9,8 @@ use actix_web::{
     App, HttpServer,
 };
 use kvdb::KeyValueDB;
+use kvdb_rocksdb::Database;
+use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
 
 use crate::{
     custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::CustodyService},
@@ -18,7 +20,6 @@ use crate::{
 // use opentelemetry::{
 //     sdk::export::trace::
 // };
-use crate::{routes, state::State};
 use actix_web_opentelemetry::RequestTracing;
 
 
@@ -26,6 +27,8 @@ pub fn run<D: 'static + KeyValueDB>(
     listener: TcpListener,
     state: Data<State<D>>,
     custody: Data<RwLock<CustodyService>>,
+    params: Data<Parameters<Bn256>>,
+    custody_db: Data<Database>
 ) -> Result<Server, std::io::Error> {
     tracing::info!("starting webserver");
 
@@ -67,6 +70,8 @@ pub fn run<D: 'static + KeyValueDB>(
             .route("/history", web::get().to(history::<D>))
             .app_data(state.clone())
             .app_data(custody.clone())
+            .app_data(params.clone())
+            .app_data(custody_db.clone())
     })
     .listen(listener)?
     .run();

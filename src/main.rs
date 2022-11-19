@@ -2,10 +2,8 @@ use relayer_rs::{
     configuration::get_config,
     contracts::Pool,
     startup::Application,
-    telemetry::{get_subscriber, init_subscriber},
     tx_checker, tx_sender, types::job::Job,
-    configuration::get_config, contracts::Pool, startup::Application, state::Job,
-    telemetry::setup_telemetry, tx_checker, tx_sender,
+    telemetry::setup_telemetry,
 };
 use tracing::Instrument;
 use std::sync::Mutex;

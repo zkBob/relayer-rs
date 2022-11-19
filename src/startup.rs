@@ -46,17 +46,22 @@ impl<D: 'static + KeyValueDB> Application<D> {
             settings: Data::new(configuration.clone()),
         });
 
-        let tx_params = configuration.application.get_tx_params();
+        let tx_params = Data::new(configuration.application.get_tx_params());
         let host = configuration.application.host;
         let address = format!("{}:{}", host, configuration.application.port);
         let listener = TcpListener::bind(address)?;
         let port = listener.local_addr().unwrap().port();
+        let db = Data::new(CustodyService::get_db(&configuration.custody.db_path));
         let custody = Data::new(RwLock::new(CustodyService::new(
-            tx_params,
+            // tx_params,
+            
             configuration.custody,
             state.clone(),
+            db.clone(),
         )));
-        let server = routes::run(listener, state.clone(), custody)?;
+
+
+        let server = routes::run(listener, state.clone(), custody,tx_params, db)?;
         // let custody = custody.clone();
         Ok(Self {
             server,

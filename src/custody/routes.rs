@@ -3,6 +3,8 @@ use actix_web::{
     HttpResponse,
 };
 use kvdb::KeyValueDB;
+use kvdb_rocksdb::Database;
+use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
 use std::{str::FromStr, sync::RwLock};
 use uuid::Uuid;
 
@@ -39,10 +41,11 @@ pub async fn account_info<D: KeyValueDB>(
         CustodyServiceError::StateSyncError
     })?;
 
-    custody.sync_account(account_id, &state)?;
+    custody.sync_account(account_id, &state).await?;
 
     let account_info = custody
         .account_info(account_id)
+        .await
         .ok_or(CustodyServiceError::AccountNotFound)?;
 
     Ok(HttpResponse::Ok().json(account_info))
@@ -79,13 +82,15 @@ pub async fn list_accounts<D: KeyValueDB>(
         CustodyServiceError::StateSyncError
     })?;
 
-    Ok(HttpResponse::Ok().json(custody.list_accounts()))
+    Ok(HttpResponse::Ok().json(custody.list_accounts().await))
 }
 
 pub async fn transfer<D: KeyValueDB>(
     request: Json<TransferRequest>,
     state: Data<State<D>>,
     custody: Custody,
+    params: Data<Parameters<Bn256>>,
+    custody_db: Data<Database>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let request: TransferRequest = request.0.into();
 
@@ -99,15 +104,19 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::CustodyLockError
     })?;
 
-    custody.sync_account(account_id, &state)?;
+    let relayer_url = custody.settings.relayer_url.clone();
+    let account = custody.account(account_id).unwrap();
 
+    // custody.sync_account(account_id, &state)?;
+
+        // account.sync(&state).await?;
     let request_id = request
         .request_id
         .clone()
         .unwrap_or(Uuid::new_v4().to_string());
-    if custody.get_job_id_by_request_id(&request_id)?.is_some() {
-        return Err(CustodyServiceError::DuplicateTransactionId);
-    }
+    // if custody.get_job_id_by_request_id(&request_id)?.is_some() {
+    //     return Err(CustodyServiceError::DuplicateTransactionId);
+    // }
 
     // request.request_id = Some(request_id.clone());
 
@@ -119,22 +128,21 @@ pub async fn transfer<D: KeyValueDB>(
         retries_left: 42,
         status: TransferStatus::Proving,
         tx_hash: None,
-        failure_reason: None
+        failure_reason: None,
+        account:Data::new(account),
+        relayer_url,
+        params,
+        db: custody_db,
     };
 
     // custody.update_task_status(task.clone(), TransferStatus::New).await?;
+    // task.update_status(TransferStatus::Proving).await.unwrap();
 
-    custody
-        .sender
-        .send(task.clone())
-        .await.unwrap();
-        
-        custody.update_task_status(task.clone(), TransferStatus::Proving).await
-        .map(|()| {
-            HttpResponse::Ok().json(TransferResponse {
-                request_id: request_id.clone(),
-            })
-        })
+    custody.sender.send(task).await.unwrap();
+
+    Ok(HttpResponse::Ok().json(TransferResponse {
+        request_id: request_id.clone(),
+    }))
 }
 
 pub async fn fetch_tx_status(
@@ -158,7 +166,7 @@ pub async fn fetch_tx_status(
     })?;
 
     Ok(TransactionStatusResponse {
-        status:  TransferStatus::from(response.state),
+        status: TransferStatus::from(response.state),
         tx_hash: response.tx_hash,
         failure_reason: response.failed_reason,
     })
@@ -194,7 +202,7 @@ pub async fn generate_shielded_address<D: KeyValueDB>(
     })?;
 
     let account = custody.account(account_id)?;
-    let address = account.generate_address();
+    let address = account.generate_address().await;
 
     Ok(HttpResponse::Ok().json(GenerateAddressResponse { address }))
 }
@@ -214,7 +222,7 @@ pub async fn history<D: KeyValueDB>(
         CustodyServiceError::CustodyLockError
     })?;
 
-    custody.sync_account(account_id, &state)?;
+    custody.sync_account(account_id, &state).await?;
 
     let account = custody.account(account_id)?;
     let txs = account
