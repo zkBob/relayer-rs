@@ -62,9 +62,7 @@ pub struct CustodyService {
     pub params: Parameters<Bn256>,
     pub db: kvdb_rocksdb::Database,
     pub sender: Sender<ScheduledTask>,
-    //pub receiver: Receiver<ScheduledTask>,
     pub status_sender: Sender<ScheduledTask>,
-    //pub status_receiver: Receiver<ScheduledTask>,
     pub webhook_sender: Sender<ScheduledTask>,
     pub webhook_receiver: Receiver<ScheduledTask>,
 }
@@ -329,7 +327,6 @@ impl CustodyService {
                     // transaction has been mined, set tx_hash and status
                     //TODO: call webhook on_complete
                     Some(tx_hash) => {
-                        // let mut task = task.clone();
                         task.tx_hash = Some(tx_hash);
                         task.status = TransferStatus::Done;
                         self.update_task_status(task, TransferStatus::Done)
@@ -578,10 +575,7 @@ impl CustodyService {
     pub async fn update_task_status(
         &self,
         task: ScheduledTask,
-        // request_id: &str,
-        // job_id: Option<Vec<u8>>,
         status: TransferStatus,
-        // tx_hash: Option<String>,
     ) -> Result<(), CustodyServiceError> {
         let webhook_task = task.clone();
         let tx = {

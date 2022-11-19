@@ -98,8 +98,6 @@ pub async fn transfer<D: KeyValueDB>(
         return Err(CustodyServiceError::DuplicateTransactionId);
     }
 
-    // request.request_id = Some(request_id.clone());
-
     let task = ScheduledTask {
         request_id: request_id.clone(),
         request,
@@ -111,19 +109,17 @@ pub async fn transfer<D: KeyValueDB>(
         failure_reason: None
     };
 
-    // custody.update_task_status(task.clone(), TransferStatus::New).await?;
-
     custody
         .sender
         .send(task.clone())
-        .await.unwrap();
+        .await
+        .unwrap();
         
-        custody.update_task_status(task.clone(), TransferStatus::Proving).await
-        .map(|()| {
-            HttpResponse::Ok().json(TransferResponse {
-                request_id: request_id.clone(),
-            })
-        })
+    custody.update_task_status(task.clone(), TransferStatus::Proving).await?;
+        
+    Ok(HttpResponse::Ok().json(TransferResponse {
+        request_id: request_id.clone(),
+    }))
 }
 
 pub async fn fetch_tx_status(
