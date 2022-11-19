@@ -82,7 +82,11 @@ pub enum TransferStatus {
 impl From<String> for TransferStatus {
     fn from(val: String) -> Self {
         match val.as_str() {
-            "complete" => Self::Done,
+            "waiting" => Self::Relaying,
+            "sent" => Self::Mining,
+            "reverted" => Self::Failed(CustodyServiceError::RelayerSendError), // TODO: fix error
+            "completed" => Self::Done,
+            "failed" => Self::Failed(CustodyServiceError::RelayerSendError),
             _ => Self::Failed(CustodyServiceError::RelayerSendError),
         }
     }
@@ -90,11 +94,10 @@ impl From<String> for TransferStatus {
 
 #[derive(Serialize, Deserialize)]
 pub struct JobShortInfo {
-    // request_id: String,
-    job_id: Option<Vec<u8>>,
-    status: TransferStatus,
-    tx_hash: Option<String>,
-    failure_reason: Option<String>,
+    pub job_id: Option<String>,
+    pub status: TransferStatus,
+    pub tx_hash: Option<String>,
+    pub failure_reason: Option<String>,
 }
 
 impl CustodyService {
@@ -127,16 +130,11 @@ impl CustodyService {
         });
     }
 
-    pub fn relayer_endpoint(&self, request_id: String) -> Result<String, CustodyServiceError> {
-        let job_id = self
-            .db
-            .get(CustodyDbColumn::JobsIndex.into(), &request_id.into_bytes())
-            .unwrap()
-            .ok_or(CustodyServiceError::TransactionNotFound)?;
+    pub fn relayer_endpoint(&self, job_id: &str) -> Result<String, CustodyServiceError> {
         Ok(format!(
             "{}/job/{}",
             self.settings.relayer_url,
-            String::from_utf8(job_id).unwrap()
+            job_id
         ))
     }
 
@@ -144,9 +142,7 @@ impl CustodyService {
         &self,
         mut task: ScheduledTask,
     ) -> Result<(), CustodyServiceError> {
-        // let request_id = task.clone().request_id;
         let transaction_request = vec![self.transfer(task.request.clone())?];
-
         let relayer_endpoint = format!("{}/sendTransactions", self.settings.relayer_url);
 
         let response = reqwest::Client::new()
@@ -185,7 +181,7 @@ impl CustodyService {
 
         let job_id = response.job_id.clone();
 
-        task.job_id = Some(job_id.into_bytes());
+        task.job_id = Some(job_id);
         task.status = TransferStatus::Relaying;
         self.update_task_status(task.clone(), TransferStatus::Relaying)
             .await
@@ -325,8 +321,7 @@ impl CustodyService {
         mut task: ScheduledTask,
         queue: Sender<ScheduledTask>,
     ) -> () {
-        // let request_id = task.request.request_id.as_ref().unwrap();
-        let endpoint = task.endpoint.as_ref().unwrap();
+        let endpoint = self.relayer_endpoint(&task.job_id.clone().unwrap()).unwrap();
         match fetch_tx_status(&endpoint).await {
             //we have successfuly retrieved job status from relayer
             Ok(relayer_response) => {
@@ -620,23 +615,29 @@ impl CustodyService {
         Ok(())
     }
 
-    pub fn get_job_id_by_request_id(
+    pub fn get_job_info_by_request_id(
         &self,
         request_id: &str,
-    ) -> Result<Option<String>, CustodyServiceError> {
+    ) -> Result<Option<JobShortInfo>, CustodyServiceError> {
         self.db
             .get(CustodyDbColumn::JobsIndex.into(), request_id.as_bytes())
             .map_err(|err| {
                 tracing::error!("failed to get job id from database: {}", err);
                 CustodyServiceError::DataBaseReadError
             })?
-            .map(|id| {
-                String::from_utf8(id).map_err(|err| {
-                    tracing::error!("failed to parse job id from database: {}", err);
-                    CustodyServiceError::DataBaseReadError
-                })
+            .map(|value| {
+                let job_short_info: JobShortInfo = serde_json::from_slice(&value).unwrap();
+                Ok(job_short_info)
             })
             .map_or(Ok(None), |v| v.map(Some))
+    }
+
+    pub fn has_request_id(&self, request_id: &str) -> Result<bool, CustodyServiceError> {
+        self.db.has_key(CustodyDbColumn::JobsIndex.into(), request_id.as_bytes())
+            .map_err(|err| {
+                tracing::error!("failed to get job id from database: {}", err);
+                CustodyServiceError::DataBaseReadError
+            })
     }
 
     pub fn save_nullifier(&self, request_id: &str, nullifier: Vec<u8>) -> Result<(), String> {

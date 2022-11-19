@@ -96,7 +96,7 @@ pub struct TransferRequest {
 pub struct ScheduledTask {
     pub request_id: String,
     pub request : TransferRequest,
-    pub job_id: Option<Vec<u8>>,
+    pub job_id: Option<String>,
     pub endpoint: Option<String>,
     pub retries_left: u8,
     pub status: TransferStatus,

@@ -94,7 +94,7 @@ pub async fn transfer<D: KeyValueDB>(
         .request_id
         .clone()
         .unwrap_or(Uuid::new_v4().to_string());
-    if custody.get_job_id_by_request_id(&request_id)?.is_some() {
+    if custody.has_request_id(&request_id)? {
         return Err(CustodyServiceError::DuplicateTransactionId);
     }
 
@@ -159,8 +159,24 @@ pub async fn transaction_status<D: KeyValueDB>(
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
 
-    let relayer_endpoint = custody.relayer_endpoint(request.0.request_id)?;
-    let transaction_status = fetch_tx_status(&relayer_endpoint).await?;
+    let request_id = request.0.request_id;
+    let job_info = custody.get_job_info_by_request_id(&request_id)?.ok_or(
+        CustodyServiceError::TransactionNotFound
+    )?;
+
+    let transaction_status = match job_info.job_id  {
+        Some(id) => {
+            let relayer_endpoint = custody.relayer_endpoint(&id)?;
+            fetch_tx_status(&relayer_endpoint).await?
+        },
+        None => {
+            TransactionStatusResponse {
+                status: job_info.status,
+                tx_hash: job_info.tx_hash,
+                failure_reason: job_info.failure_reason,
+            }
+        }
+    };
 
     Ok(HttpResponse::Ok().json(transaction_status))
 }

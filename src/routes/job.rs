@@ -15,11 +15,12 @@ use super::ServiceError;
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobResponse {
+    pub job_id: Option<Vec<String>>,
     pub state: String,
     pub tx_hash: Option<String>,
     pub failed_reason: Option<String>,
     pub created_on: u128,
-    pub finished_on: u128,
+    pub finished_on: Option<u128>,
 }
 
 pub async fn job<D: KeyValueDB>(
@@ -47,11 +48,12 @@ pub async fn job<D: KeyValueDB>(
     };
 
     let mut response = JobResponse {
+        job_id: None,
         state: String::from(state),
         tx_hash: None,
         failed_reason: None,
         created_on: job.created.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis(),
-        finished_on: 0, // TODO: Add finished in job //job.finished.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
+        finished_on: None, // TODO: Add finished in job //job.finished.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
     };
 
     if job.transaction.is_some() {
