@@ -3,7 +3,8 @@ use actix_web::{
     HttpResponse,
 };
 use kvdb::KeyValueDB;
-use std::{str::FromStr, sync::RwLock};
+use tokio::sync::RwLock;
+use std::{str::FromStr};
 use uuid::Uuid;
 
 use crate::{custody::types::TransferResponse, routes::job::JobResponse, state::State};
@@ -29,10 +30,7 @@ pub async fn account_info<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     state.sync().await.map_err(|_| {
         tracing::error!("failed to sync state");
@@ -53,10 +51,7 @@ pub async fn signup<D: KeyValueDB>(
     _state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
-    let mut custody = custody.write().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let mut custody = custody.write().await;
 
     let account_id = custody.new_account(request.0.description);
 
@@ -69,10 +64,7 @@ pub async fn list_accounts<D: KeyValueDB>(
     state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     state.sync().await.map_err(|_| {
         tracing::error!("failed to sync state");
@@ -94,10 +86,7 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     custody.sync_account(account_id, &state)?;
 
@@ -168,10 +157,7 @@ pub async fn transaction_status<D: KeyValueDB>(
     _: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     let relayer_endpoint = custody.relayer_endpoint(request.0.request_id)?;
     let transaction_status = fetch_tx_status(&relayer_endpoint).await?;
@@ -188,10 +174,7 @@ pub async fn generate_shielded_address<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     let account = custody.account(account_id)?;
     let address = account.generate_address();
@@ -209,10 +192,7 @@ pub async fn history<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     custody.sync_account(account_id, &state)?;
 

@@ -1,4 +1,4 @@
-use std::{net::TcpListener, sync::RwLock};
+use std::net::TcpListener;
 
 use actix_cors::Cors;
 use actix_http::header;
@@ -9,6 +9,7 @@ use actix_web::{
     App, HttpServer,
 };
 use kvdb::KeyValueDB;
+use tokio::sync::RwLock;
 
 use crate::{
     custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::CustodyService},

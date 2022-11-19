@@ -5,7 +5,6 @@ use crate::{
         types::{HistoryDbColumn, HistoryRecord},
     },
     helpers::BytesRepr,
-    routes::job::JobResponse,
     state::State,
     types::{
         job::Response,
@@ -27,7 +26,7 @@ use std::{
     fs, thread,
     time::{Duration, SystemTime},
 };
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::{mpsc::{self, Receiver, Sender}, RwLock};
 use uuid::Uuid;
 
 use super::{
@@ -36,7 +35,7 @@ use super::{
     errors::CustodyServiceError,
     tx_parser::{self, IndexedTx, TxParser},
     types::{
-        AccountDetailedInfo, AccountShortInfo, Fr, RelayerState, ScheduledTask,
+        AccountShortInfo, Fr, RelayerState, ScheduledTask,
         TransactionStatusResponse, TransferRequest,
     },
 };
@@ -63,9 +62,9 @@ pub struct CustodyService {
     pub params: Parameters<Bn256>,
     pub db: kvdb_rocksdb::Database,
     pub sender: Sender<ScheduledTask>,
-    pub receiver: Receiver<ScheduledTask>,
+    //pub receiver: Receiver<ScheduledTask>,
     pub status_sender: Sender<ScheduledTask>,
-    pub status_receiver: Receiver<ScheduledTask>,
+    //pub status_receiver: Receiver<ScheduledTask>,
     pub webhook_sender: Sender<ScheduledTask>,
     pub webhook_receiver: Receiver<ScheduledTask>,
 }
@@ -97,30 +96,33 @@ pub struct JobShortInfo {
     tx_hash: Option<String>,
     failure_reason: Option<String>,
 }
+
 impl CustodyService {
-    pub fn start_relayer_sender(mut self) {
+    pub fn start_relayer_sender(custody: Data<RwLock<CustodyService>>, mut receiver: Receiver<ScheduledTask>) {
         tokio::task::spawn(async move {
-            tracing::info!("starting tx_sender...");
-
-            while let Some(task) = self.receiver.recv().await {
+            tracing::info!("starting relayer sender...");
+            
+            while let Some(task) = receiver.recv().await {
                 let scheduled_task = task.clone();
+                let custody = custody.read().await;
 
-                match self.send_tx_to_relayer(scheduled_task).await {
+                match custody.send_tx_to_relayer(scheduled_task).await {
                     Ok(_) => tracing::debug!("sent to status fetch queue {:#?}", task),
                     Err(_) => tracing::error!("failed to process {:#?}", task),
-                }
+                };
             }
         });
     }
 
-    pub fn start_status_processor(mut self) {
+    pub fn start_status_processor(custody: Data<RwLock<CustodyService>>, mut receiver: Receiver<ScheduledTask>) {
         tokio::task::spawn(async move {
-            tracing::info!("starting tx_sender...");
+            tracing::info!("starting status processor...");
 
-            while let Some(task) = self.status_receiver.recv().await {
-                let sender = self.status_sender.clone();
+            while let Some(task) = receiver.recv().await {
+                let custody = custody.read().await;
+                let sender = custody.status_sender.clone();
 
-                self.fetch_status_with_retries(task, sender).await;
+                custody.fetch_status_with_retries(task, sender).await;
             }
         });
     }
@@ -198,11 +200,12 @@ impl CustodyService {
             .map_err(|e| CustodyServiceError::InternalError(e.to_string()))?;
         Ok(())
     }
+    
     pub fn new<D: KeyValueDB>(
         params: Parameters<Bn256>,
         settings: CustodyServiceSettings,
         state: Data<State<D>>,
-    ) -> Self {
+    ) -> Data<RwLock<Self>> {
         let base_path = format!("{}/accounts_data", &settings.db_path);
         let mut accounts = vec![];
 
@@ -245,18 +248,23 @@ impl CustodyService {
         let (status_sender, status_receiver) = mpsc::channel::<ScheduledTask>(100);
         let (webhook_sender, webhook_receiver) = mpsc::channel::<ScheduledTask>(100);
 
-        Self {
+        let custody = Self {
             accounts,
             settings,
             params,
             db,
             sender,
-            receiver,
+            //receiver,
             status_sender,
-            status_receiver,
+            //status_receiver,
             webhook_sender,
             webhook_receiver,
-        }
+        };
+
+        let c = Data::new(RwLock::new(custody));
+        CustodyService::start_relayer_sender(c.clone(), receiver);
+        CustodyService::start_status_processor(c.clone(), status_receiver);
+        c
     }
 
     pub fn new_account(&mut self, description: String) -> Uuid {
