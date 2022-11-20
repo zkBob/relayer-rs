@@ -123,7 +123,7 @@ impl Account {
         self.history.write(batch).unwrap();
         tracing::info!("account {} saved history", account_id);
 
-        self.update_state(parse_result.state_update);
+        self.update_state(parse_result.state_update).await;
         tracing::info!("account {} state updated", account_id);
 
         Ok(())

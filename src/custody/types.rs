@@ -12,7 +12,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 use std::{fmt::Debug};
 
-use libzkbob_rs::libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait};
+use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}, client::TransactionData};
 
 use super::{account::Account, service::{TransferStatus, CustodyService}, tx_parser::DecMemo};
 
@@ -49,18 +49,18 @@ pub type Fs = <PoolParams as PoolParamsTrait>::Fs;
 
 pub type RelayerState<D> = Data<State<D>>;
 
-#[derive(Serialize)]
-struct TransactionData {
-    public: TransferPub<Fr>,
-    secret: TransferSec<Fr>,
-    #[serde(with = "hex")]
-    ciphertext: Vec<u8>,
-    // #[serde(with = "hex")]
-    memo: Vec<u8>,
-    commitment_root: Num<Fr>,
-    out_hashes: SizedVec<Num<Fr>, { constants::OUT + 1 }>,
-    parsed_delta: ParsedDelta,
-}
+// #[derive(Serialize)]
+// struct TransactionData {
+//     public: TransferPub<Fr>,
+//     secret: TransferSec<Fr>,
+//     #[serde(with = "hex")]
+//     ciphertext: Vec<u8>,
+//     // #[serde(with = "hex")]
+//     memo: Vec<u8>,
+//     commitment_root: Num<Fr>,
+//     out_hashes: SizedVec<Num<Fr>, { constants::OUT + 1 }>,
+//     parsed_delta: ParsedDelta,
+// }
 #[derive(Serialize)]
 struct ParsedDelta {
     v: i64,
@@ -88,12 +88,12 @@ pub struct TransferRequest {
 
     pub webhook: Option<String>,
 }
-#[derive(Clone)]
+// #[derive(Clone)]
 pub struct ScheduledTask {
     pub request_id: String,
     pub account_id: Uuid,
     pub db: Data< kvdb_rocksdb::Database>,
-    pub request: TransferRequest,
+    // pub request: TransferRequest,
     pub job_id: Option<Vec<u8>>,
     pub endpoint: Option<String>,
     pub relayer_url: String,
@@ -103,7 +103,8 @@ pub struct ScheduledTask {
     pub failure_reason: Option<String>,
     // pub account: Data<Account>,
     pub params: Data<Parameters<Bn256>>,
-    pub custody: Data<RwLock<CustodyService>>
+    // pub custody: Data<RwLock<CustodyService>>
+    pub tx: TransactionData<Fr>
 }
 
 
@@ -112,7 +113,7 @@ impl Debug for ScheduledTask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ScheduledTask")
             .field("request_id", &self.request_id)
-            .field("request", &self.request)
+            // .field("request", &self.request)
             .field("job_id", &self.job_id)
             .field("endpoint", &self.endpoint)
             .field("relayer_url", &self.relayer_url)

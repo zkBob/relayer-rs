@@ -89,101 +89,50 @@ impl From<String> for TransferStatus {
 #[derive(Serialize, Deserialize)]
 pub struct JobShortInfo {
     // request_id: String,
-    job_id: Option<Vec<u8>>,
+    // #[serde(skip)]
+    // job_id: Option<Vec<u8>>,
     status: TransferStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tx_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     failure_reason: Option<String>,
 }
 
-// pub async fn send_tx_to_relayer(
-//     mut task: ScheduledTask,
-//     status_sender: Sender<ScheduledTask>
-// ) -> Result<(), CustodyServiceError> {
-//     // let request_id = task.clone().request_id;
-//     let transaction_request = vec![task.transfer()?];
-
-//     let relayer_endpoint = format!("{}/sendTransactions", task.relayer_url);
-
-//     let response = reqwest::Client::new()
-//         .post(relayer_endpoint)
-//         .json(&transaction_request)
-//         .header("Content-type", "application/json")
-//         .send()
-//         .await
-//         .map_err(|e| {
-//             tracing::error!(
-//                 "network exception when sending request to relayer: {:#?}",
-//                 e
-//             );
-//             CustodyServiceError::RelayerSendError
-//         })?;
-
-//     let response = response.error_for_status().map_err(|e| {
-//         tracing::error!("relayer returned bad status code {:#?}", e);
-//         CustodyServiceError::RelayerSendError
-//     })?;
-
-//     let response: Response = response.json().await.map_err(|e| {
-//         tracing::error!("the relayer response was not JSON: {:#?}", e);
-//         CustodyServiceError::RelayerSendError
-//     })?;
-
-//     // TODO: multitransfer
-//     let nullifier = transaction_request[0].proof.inputs[1].bytes();
-//     save_nullifier(&task.request_id, nullifier)
-//         .map_err(|err| {
-//             tracing::error!("failed to save nullifier: {}", err);
-//             CustodyServiceError::DataBaseWriteError(err.to_string())
-//         })?;
-
-//     tracing::info!("relayer returned the job id: {:#?}", response.job_id);
-
-//     let job_id = response.job_id.clone();
-
-//     task.job_id = Some(job_id.into_bytes());
-//     task.status = TransferStatus::Relaying;
-//     update_task_status(task.clone(), TransferStatus::Relaying)
-//         .await
-//         .map_err(|err| {
-//             tracing::error!("failed to save job_id: {}", err);
-//             CustodyServiceError::DataBaseWriteError(err.to_string())
-//         })?;
-
-//     status_sender
-//         .send(task)
-//         .await
-//         .map_err(|e| CustodyServiceError::InternalError(e.to_string()))?;
-//     Ok(())
-// }
-pub fn start_relayer_sender(mut prover_receiver: Receiver<ScheduledTask>) {
+pub fn start_prover(
+    mut prover_receiver: Receiver<ScheduledTask>,
+    status_sender: Sender<ScheduledTask>,
+) {
     tokio::task::spawn(async move {
-        tracing::info!("starting tx_sender...");
-
-        while let Some(task) = prover_receiver.recv().await {
-            let scheduled_task = task.clone();
-            let span = info_span!(
-                "processing message from processing queue {:#?}",
-                request_id = &scheduled_task.request_id
-            );
-
-            // match self.send_tx_to_relayer(scheduled_task).instrument(span).await {
-            //     Ok(_) => tracing::debug!("sent to status fetch queue {:#?}", task),
-            //     Err(_) => tracing::error!("failed to process {:#?}", task),
-            // }
+        while let Some(mut task) = prover_receiver.recv().await {
+            match task.make_proof_and_send_to_relayer().await {
+                Ok(_) => {
+                    status_sender.send(task).await.unwrap();
+                }
+                Err(e) => {
+                    tracing::error!("error from prover: {:#?}", &e);
+                    task.update_status(TransferStatus::Failed(e)).await.unwrap();
+                }
+            }
         }
     });
 }
 
-pub fn start_status_processor(
-    mut status_receiver: Receiver<ScheduledTask>,
-    status_sender: Data<Sender<ScheduledTask>>,
+pub fn start_status_updater(
+    mut status_updater_receiver: Receiver<ScheduledTask>,
+    status_updater_sender: Sender<ScheduledTask>,
 ) {
     tokio::task::spawn(async move {
-        tracing::info!("starting tx_sender...");
-
-        while let Some(task) = status_receiver.recv().await {
-
-            // fetch_status_with_retries(task, status_sender).await;
+        while let Some(mut task) = status_updater_receiver.recv().await {
+            match task.fetch_status_with_retries().await {
+                Err(CustodyServiceError::RetryNeeded) => {
+                    let status_updater_sender = status_updater_sender.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(10)).await; //TODO: move to config
+                        status_updater_sender.send(task).await.unwrap();
+                    });
+                }
+                _ => (),
+            };
         }
     });
 }
@@ -283,11 +232,11 @@ impl CustodyService {
 
         let endpoint = task.endpoint.as_ref().unwrap();
 
-        let retry_task = task.clone();
+        // let retry_task = task.clone();
         let body = serde_json::to_vec(&TransactionStatusResponse {
-            status: task.status,
-            tx_hash: task.tx_hash,
-            failure_reason: task.failure_reason,
+            status: task.status.clone(),
+            tx_hash: task.tx_hash.clone(),
+            failure_reason: task.failure_reason.clone(),
         })
         .unwrap();
 
@@ -296,7 +245,7 @@ impl CustodyService {
                 if resp.error_for_status().is_err() {
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(30)).await;
-                        queue.send(retry_task).await.unwrap();
+                        queue.send(task).await.unwrap();
                     })
                     .await
                     .unwrap();
@@ -304,75 +253,10 @@ impl CustodyService {
             }
             Err(_) => tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(30)).await;
-                queue.send(retry_task).await.unwrap();
+                queue.send(task).await.unwrap();
             })
             .await
             .unwrap(),
-        }
-    }
-
-    pub async fn fetch_status_with_retries(
-        &self,
-        mut task: ScheduledTask,
-        queue: Sender<ScheduledTask>,
-    ) -> () {
-        // let request_id = task.request.request_id.as_ref().unwrap();
-        let endpoint = task.endpoint.as_ref().unwrap();
-        match fetch_tx_status(&endpoint).await {
-            //we have successfuly retrieved job status from relayer
-            Ok(relayer_response) => {
-                match relayer_response.tx_hash {
-                    // transaction has been mined, set tx_hash and status
-                    //TODO: call webhook on_complete
-                    Some(tx_hash) => {
-                        // let mut task = task.clone();
-                        task.tx_hash = Some(tx_hash);
-                        // task.status = TransferStatus::Done;
-                        task.update_status(TransferStatus::Done).await.unwrap();
-                    }
-                    // transaction not mined
-                    None => {
-                        // transaction rejected
-                        if let Some(failure_reason) = relayer_response.failure_reason {
-                            task.status = TransferStatus::Failed(
-                                CustodyServiceError::TaskRejectedByRelayer(failure_reason.clone()),
-                            );
-                            task.update_status(TransferStatus::Failed(
-                                CustodyServiceError::TaskRejectedByRelayer(failure_reason),
-                            ))
-                            .await
-                            .unwrap();
-                        // waiting for transaction to be mined, schedule a retry
-                        } else {
-                            tokio::spawn(async move {
-                                tokio::time::sleep(Duration::from_secs(30)).await;
-                                queue.send(task).await.unwrap();
-                            });
-                        }
-                    }
-                };
-            }
-            //we couldn't get valid response
-            Err(_) => {
-                let mut task = task.clone();
-                if task.retries_left > 0 {
-                    task.retries_left -= 1;
-                    //schedule a retry, reduce retry count
-                    tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(30)).await;
-                        queue.send(task).await.unwrap();
-                    });
-                } else {
-                    //if no more retries left, mark request as failed to prevent resource exhaustion
-                    //TODO: increase lag exponentialy
-                    tracing::error!("retries exhausted for task {:#?}", task);
-                    task.update_status(TransferStatus::Failed(
-                        CustodyServiceError::RetriesExhausted,
-                    ))
-                    .await
-                    .unwrap();
-                }
-            }
         }
     }
 
@@ -562,7 +446,7 @@ impl CustodyService {
         account.history.write(batch).unwrap();
         tracing::info!("account {} saved history", account_id);
 
-        account.update_state(parse_result.state_update);
+        account.update_state(parse_result.state_update).await;
         tracing::info!("account {} state updated", account_id);
 
         Ok(())
@@ -615,6 +499,77 @@ impl CustodyService {
 }
 
 impl ScheduledTask {
+    pub async fn fetch_status_with_retries(&mut self) -> Result<(), CustodyServiceError> {
+        tracing::info!(
+            "fetchin status for task {}, retries left {}",
+            &self.request_id,
+            &self.retries_left
+        );
+        // let request_id = task.request.request_id.as_ref().unwrap();
+        let endpoint = self.endpoint.as_ref().unwrap();
+        match fetch_tx_status(&endpoint).await {
+            //we have successfuly retrieved job status from relayer
+            Ok(relayer_response) => {
+                match relayer_response.tx_hash {
+                    // transaction has been mined, set tx_hash and status
+                    //TODO: call webhook on_complete
+                    Some(tx_hash) => {
+                        // let mut task = self.clone();
+                        self.tx_hash = Some(tx_hash);
+                        // self.status = TransferStatus::Done;
+                        self.update_status(TransferStatus::Done).await.unwrap();
+                        tracing::info!("marked request {} as done", &self.request_id);
+                        Ok(())
+                    }
+                    // transaction not mined
+                    None => {
+                        // transaction rejected
+                        if let Some(failure_reason) = relayer_response.failure_reason {
+                            self.status = TransferStatus::Failed(
+                                CustodyServiceError::TaskRejectedByRelayer(failure_reason.clone()),
+                            );
+                            self.update_status(TransferStatus::Failed(
+                                CustodyServiceError::TaskRejectedByRelayer(failure_reason),
+                            ))
+                            .await
+                            .unwrap();
+                            Ok(())
+                        // waiting for transaction to be mined, schedule a retry
+                        } else {
+                            Err(CustodyServiceError::RetryNeeded)
+                            // tokio::spawn(async move {
+                            //     tokio::time::sleep(Duration::from_secs(30)).await;
+                            //     status_sender.send(self).await.unwrap();
+                            // });
+                        }
+                    }
+                }
+            }
+            //we couldn't get valid response
+            Err(_) => {
+                // let mut task = self.clone();
+                if self.retries_left > 0 {
+                    self.retries_left -= 1;
+                    Err(CustodyServiceError::RetryNeeded)
+                    //schedule a retry, reduce retry count
+                    // tokio::spawn(async move {
+                    //     tokio::time::sleep(Duration::from_secs(30)).await;
+                    //     status_sender.send(self).await.unwrap();
+                    // });
+                } else {
+                    //if no more retries left, mark request as failed to prevent resource exhaustion
+                    //TODO: increase lag exponentialy
+                    tracing::error!("retries exhausted for task {:#?}", self);
+                    self.update_status(TransferStatus::Failed(
+                        CustodyServiceError::RetriesExhausted,
+                    ))
+                    .await
+                    .unwrap();
+                    Err(CustodyServiceError::RetriesExhausted)
+                }
+            }
+        }
+    }
     pub fn save_nullifier(&self, nullifier: Vec<u8>) -> Result<(), String> {
         let tx = {
             let mut tx = self.db.transaction();
@@ -628,24 +583,11 @@ impl ScheduledTask {
         self.db.write(tx).map_err(|err| err.to_string())
     }
 
-    pub async fn make_proof_and_relayer_request(&mut self) -> Result<(), CustodyServiceError> {
+    pub async fn make_proof_and_send_to_relayer(&mut self) -> Result<(), CustodyServiceError> {
         {
-            let request = &self.request;
+            let tx = self.tx.clone();
             // let account_id = Uuid::from_str(&request.account_id).unwrap();
-            let custody = self.custody.read().await;
-            let account = custody.account(self.account_id)?;
-            let account = account.inner.read().await;
 
-            let fee = 100000000;
-            let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
-
-            let tx_output: TxOutput<Fr> = TxOutput {
-                to: request.to.clone(),
-                amount: TokenAmount::new(Num::from_uint(NumRepr::from(request.amount)).unwrap()),
-            };
-            let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], vec![tx_output]);
-
-            let tx = account.create_tx(transfer, None, None).unwrap();
             let (inputs, proof) = prove_tx(
                 &self.params,
                 &*libzeropool::POOL_PARAMS,
@@ -700,6 +642,8 @@ impl ScheduledTask {
 
             let job_id = response.job_id.clone();
 
+            self.endpoint = Some(format!("{}/job/{}", self.relayer_url, job_id.clone()));
+
             self.job_id = Some(job_id.into_bytes());
         }
 
@@ -723,7 +667,7 @@ impl ScheduledTask {
                 CustodyDbColumn::JobsIndex.into(),
                 self.request_id.as_bytes(),
                 &serde_json::to_vec(&JobShortInfo {
-                    job_id: self.job_id.clone(),
+                    // job_id: self.job_id.clone(),
                     status: status.clone(),
                     tx_hash: self.tx_hash.clone(),
                     failure_reason: self.failure_reason.clone(),

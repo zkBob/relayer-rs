@@ -55,12 +55,12 @@ impl ResponseError for ServiceError {
     fn error_response(&self) -> HttpResponse {
         #[derive(Serialize)]
         struct ErrorResponse {
-            success: bool,
+            
             error: String,
         }
         
         let response = serde_json::to_string(&ErrorResponse{
-            success: false,
+            
             error: format!("{}", self),
         }).unwrap();
 

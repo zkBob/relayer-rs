@@ -1,7 +1,7 @@
 use crate::{
     configuration::Settings,
     contracts::Pool,
-    custody::{service::CustodyService, types::ScheduledTask},
+    custody::{service::{CustodyService, start_prover, start_status_updater}, types::ScheduledTask},
     routes::routes,
     state::{State, DB},
     types::job::Job,
@@ -12,8 +12,8 @@ use kvdb::KeyValueDB;
 
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier::VK};
 
-use std::{net::TcpListener, sync::RwLock};
-use tokio::sync::mpsc::{self, Sender};
+use std::{net::TcpListener};
+use tokio::sync::{mpsc::{self, Sender}, RwLock};
 
 pub struct Application<D: 'static + KeyValueDB> {
     server: Server,
@@ -54,10 +54,14 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let db = Data::new(CustodyService::get_db(&configuration.custody.db_path));
 
         let (prover_sender, prover_receiver) = mpsc::channel::<ScheduledTask>(100);
-        let (status_sender, status_receiver) = mpsc::channel::<ScheduledTask>(100);
-        let (webhook_sender, webhook_receiver) = mpsc::channel::<ScheduledTask>(100);
+        let (status_updater_sender, status_updater_receiver) = mpsc::channel::<ScheduledTask>(100);
+        // let (webhook_sender, webhook_receiver) = mpsc::channel::<ScheduledTask>(100);
 
-        let custody = Data::new(RwLock::new(CustodyService::new(
+        start_prover(prover_receiver, status_updater_sender.clone());
+
+        start_status_updater(status_updater_receiver, status_updater_sender);
+
+        let custody:Data<RwLock<CustodyService>> = Data::new(RwLock::new(CustodyService::new(
             // tx_params,
             configuration.custody,
             state.clone(),

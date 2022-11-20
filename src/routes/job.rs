@@ -19,7 +19,7 @@ pub struct JobResponse {
     pub tx_hash: Option<String>,
     pub failed_reason: Option<String>,
     pub created_on: u128,
-    pub finished_on: u128,
+    pub finished_on: Option<u128>,
 }
 
 pub async fn job<D: KeyValueDB>(

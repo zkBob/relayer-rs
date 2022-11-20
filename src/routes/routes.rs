@@ -1,4 +1,4 @@
-use std::{net::TcpListener, sync::RwLock};
+use std::{net::TcpListener,};
 
 use actix_cors::Cors;
 use actix_http::header;
@@ -11,7 +11,7 @@ use actix_web::{
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
     custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::CustodyService, types::ScheduledTask},

@@ -1,11 +1,11 @@
 use actix_http::StatusCode;
 use actix_web::{http::header::ContentType, HttpResponse, ResponseError};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Clone, Serialize,Deserialize, Debug, Error)]
+#[derive(Clone, Serialize, Deserialize, Debug, Error)]
 pub enum CustodyServiceError {
-    #[error("request malformed")]
+    #[error("request malformed or invalid: {0}")]
     BadRequest(String),
     #[error("internal error")]
     CustodyLockError,
@@ -31,8 +31,9 @@ pub enum CustodyServiceError {
     RetriesExhausted,
     #[error("relayer returned error: '{0}'")]
     TaskRejectedByRelayer(String),
+    #[error("need retry")]
+    RetryNeeded,
 }
-
 
 impl ResponseError for CustodyServiceError {
     fn status_code(&self) -> actix_http::StatusCode {
@@ -49,12 +50,10 @@ impl ResponseError for CustodyServiceError {
     fn error_response(&self) -> HttpResponse {
         #[derive(Serialize)]
         struct ErrorResponse {
-            success: bool,
             error: String,
         }
 
         let response = serde_json::to_string(&ErrorResponse {
-            success: false,
             error: format!("{}", self),
         })
         .unwrap();
