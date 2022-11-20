@@ -11,9 +11,10 @@ use actix_web::{
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
+use tokio::sync::mpsc::Sender;
 
 use crate::{
-    custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::CustodyService},
+    custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::CustodyService, types::ScheduledTask},
     routes::{self, wallet_screening},
     state::State,
 };
@@ -28,7 +29,8 @@ pub fn run<D: 'static + KeyValueDB>(
     state: Data<State<D>>,
     custody: Data<RwLock<CustodyService>>,
     params: Data<Parameters<Bn256>>,
-    custody_db: Data<Database>
+    custody_db: Data<Database>,
+    prover_queue: Data<Sender<ScheduledTask>>
 ) -> Result<Server, std::io::Error> {
     tracing::info!("starting webserver");
 
@@ -72,6 +74,7 @@ pub fn run<D: 'static + KeyValueDB>(
             .app_data(custody.clone())
             .app_data(params.clone())
             .app_data(custody_db.clone())
+            .app_data(prover_queue.clone())
     })
     .listen(listener)?
     .run();

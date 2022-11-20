@@ -65,12 +65,6 @@ pub struct CustodyService {
     pub accounts: Vec<Account>,
     // pub params: Parameters<Bn256>,
     pub db: Data<kvdb_rocksdb::Database>,
-    pub sender: Sender<ScheduledTask>,
-    pub receiver: Receiver<ScheduledTask>,
-    pub status_sender: Sender<ScheduledTask>,
-    pub status_receiver: Receiver<ScheduledTask>,
-    pub webhook_sender: Sender<ScheduledTask>,
-    pub webhook_receiver: Receiver<ScheduledTask>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -99,25 +93,6 @@ pub struct JobShortInfo {
     status: TransferStatus,
     tx_hash: Option<String>,
     failure_reason: Option<String>,
-}
-
-pub fn start_relayer_sender(
-    mut receiver: Receiver<ScheduledTask>,
-    status_sender: Sender<ScheduledTask>,
-) {
-    // let mut custody = custody.write().unwrap();
-    tokio::task::spawn(async move {
-        tracing::info!("starting tx_sender...");
-
-        while let Some(mut task) = receiver.recv().await {
-            let scheduled_task = task.clone();
-
-            match task.make_proof_and_relayer_request().await {
-                Ok(()) => status_sender.send(task).await.unwrap(),
-                Err(_) => todo!(),
-            };
-        }
-    });
 }
 
 // pub async fn send_tx_to_relayer(
@@ -180,38 +155,39 @@ pub fn start_relayer_sender(
 //         .map_err(|e| CustodyServiceError::InternalError(e.to_string()))?;
 //     Ok(())
 // }
+pub fn start_relayer_sender(mut prover_receiver: Receiver<ScheduledTask>) {
+    tokio::task::spawn(async move {
+        tracing::info!("starting tx_sender...");
+
+        while let Some(task) = prover_receiver.recv().await {
+            let scheduled_task = task.clone();
+            let span = info_span!(
+                "processing message from processing queue {:#?}",
+                request_id = &scheduled_task.request_id
+            );
+
+            // match self.send_tx_to_relayer(scheduled_task).instrument(span).await {
+            //     Ok(_) => tracing::debug!("sent to status fetch queue {:#?}", task),
+            //     Err(_) => tracing::error!("failed to process {:#?}", task),
+            // }
+        }
+    });
+}
+
+pub fn start_status_processor(
+    mut status_receiver: Receiver<ScheduledTask>,
+    status_sender: Data<Sender<ScheduledTask>>,
+) {
+    tokio::task::spawn(async move {
+        tracing::info!("starting tx_sender...");
+
+        while let Some(task) = status_receiver.recv().await {
+
+            // fetch_status_with_retries(task, status_sender).await;
+        }
+    });
+}
 impl CustodyService {
-    pub fn start_relayer_sender(mut self) {
-        tokio::task::spawn(async move {
-            tracing::info!("starting tx_sender...");
-
-            while let Some(task) = self.receiver.recv().await {
-                let scheduled_task = task.clone();
-                let span = info_span!(
-                    "processing message from processing queue {:#?}",
-                    request_id = &scheduled_task.request_id
-                );
-
-                // match self.send_tx_to_relayer(scheduled_task).instrument(span).await {
-                //     Ok(_) => tracing::debug!("sent to status fetch queue {:#?}", task),
-                //     Err(_) => tracing::error!("failed to process {:#?}", task),
-                // }
-            }
-        });
-    }
-
-    pub fn start_status_processor(mut self) {
-        tokio::task::spawn(async move {
-            tracing::info!("starting tx_sender...");
-
-            while let Some(task) = self.status_receiver.recv().await {
-                let sender = self.status_sender.clone();
-
-                self.fetch_status_with_retries(task, sender).await;
-            }
-        });
-    }
-
     pub fn relayer_endpoint(&self, request_id: String) -> Result<String, CustodyServiceError> {
         let job_id = self
             .db
@@ -271,21 +247,11 @@ impl CustodyService {
             }
         });
 
-        let (sender, receiver) = mpsc::channel::<ScheduledTask>(100);
-        let (status_sender, status_receiver) = mpsc::channel::<ScheduledTask>(100);
-        let (webhook_sender, webhook_receiver) = mpsc::channel::<ScheduledTask>(100);
-
         Self {
             accounts,
             settings,
             // params,
             db,
-            sender,
-            receiver,
-            status_sender,
-            status_receiver,
-            webhook_sender,
-            webhook_receiver,
         }
     }
 
@@ -504,30 +470,27 @@ impl CustodyService {
     }
 
     pub async fn account_info(&self, account_id: Uuid) -> Option<AccountShortInfo> {
-        match self.accounts
+        match self
+            .accounts
             .iter()
-            .find(|account| account.id == account_id) {
-                Some(account) => Some(account.short_info().await),
-                None=>None
-            }
-            
-
+            .find(|account| account.id == account_id)
+        {
+            Some(account) => Some(account.short_info().await),
+            None => None,
+        }
     }
 
     pub async fn list_accounts(&self) -> Vec<AccountShortInfo> {
-        
         let mut res: Vec<AccountShortInfo> = vec![];
 
         for account in self.accounts.iter() {
-
             res.push(account.short_info().await);
-
         }
 
         res
     }
 
-    pub  async fn sync_account<D: KeyValueDB>(
+    pub async fn sync_account<D: KeyValueDB>(
         &self,
         account_id: Uuid,
         relayer_state: &RelayerState<D>,
@@ -566,7 +529,8 @@ impl CustodyService {
 
         tracing::info!("jobs to sync {:#?}", job_indices);
 
-        let parse_result: ParseResult = TxParser::new().parse_native_tx(account.sk().await, indexed_txs);
+        let parse_result: ParseResult =
+            TxParser::new().parse_native_tx(account.sk().await, indexed_txs);
 
         tracing::info!(
             "retrieved new_accounts: {:#?} \n new notes: {:#?}",
@@ -604,13 +568,19 @@ impl CustodyService {
         Ok(())
     }
 
-    pub fn account(&self, account_id: Uuid) -> Result<Account, CustodyServiceError> {
+    pub fn account(&self, account_id: Uuid) -> Result<&Account, CustodyServiceError> {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
             .ok_or(CustodyServiceError::AccountNotFound)
-            .map(|v| *v)
     }
+
+    // pub fn move_account(&self, account_id: Uuid) -> Result<Account, CustodyServiceError> {
+    //     self.accounts
+    //         .into_iter()
+    //         .find(|account| account.id == account_id)
+    //         .ok_or(CustodyServiceError::AccountNotFound)
+    // }
 
     pub fn get_job_id_by_request_id(
         &self,
@@ -662,7 +632,8 @@ impl ScheduledTask {
         {
             let request = &self.request;
             // let account_id = Uuid::from_str(&request.account_id).unwrap();
-            let account = &self.account;
+            let custody = self.custody.read().await;
+            let account = custody.account(self.account_id)?;
             let account = account.inner.read().await;
 
             let fee = 100000000;

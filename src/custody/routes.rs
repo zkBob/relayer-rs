@@ -5,7 +5,8 @@ use actix_web::{
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
-use std::{str::FromStr, sync::RwLock};
+use std::{str::FromStr};
+use tokio::sync::{mpsc::Sender, RwLock};
 use uuid::Uuid;
 
 use crate::{custody::types::TransferResponse, routes::job::JobResponse, state::State};
@@ -31,10 +32,7 @@ pub async fn account_info<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     state.sync().await.map_err(|_| {
         tracing::error!("failed to sync state");
@@ -56,10 +54,7 @@ pub async fn signup<D: KeyValueDB>(
     _state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
-    let mut custody = custody.write().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let mut custody = custody.write().await;
 
     let account_id = custody.new_account(request.0.description);
 
@@ -72,10 +67,7 @@ pub async fn list_accounts<D: KeyValueDB>(
     state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     state.sync().await.map_err(|_| {
         tracing::error!("failed to sync state");
@@ -91,6 +83,7 @@ pub async fn transfer<D: KeyValueDB>(
     custody: Custody,
     params: Data<Parameters<Bn256>>,
     custody_db: Data<Database>,
+    prover_sender: Data<Sender<ScheduledTask>>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let request: TransferRequest = request.0.into();
 
@@ -99,17 +92,17 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
-
-    let relayer_url = custody.settings.relayer_url.clone();
-    let account = custody.account(account_id).unwrap();
+    let relayer_url = custody
+        .read()
+        .await
+        .settings
+        .relayer_url
+        .clone();
+    // let account = custody.move_account(account_id).unwrap();
 
     // custody.sync_account(account_id, &state)?;
 
-        // account.sync(&state).await?;
+    // account.sync(&state).await?;
     let request_id = request
         .request_id
         .clone()
@@ -122,6 +115,7 @@ pub async fn transfer<D: KeyValueDB>(
 
     let task = ScheduledTask {
         request_id: request_id.clone(),
+        account_id,
         request,
         job_id: None,
         endpoint: None,
@@ -129,16 +123,17 @@ pub async fn transfer<D: KeyValueDB>(
         status: TransferStatus::Proving,
         tx_hash: None,
         failure_reason: None,
-        account:Data::new(account),
+        // account:Data::new(account),
         relayer_url,
         params,
         db: custody_db,
+        custody,
     };
 
     // custody.update_task_status(task.clone(), TransferStatus::New).await?;
     // task.update_status(TransferStatus::Proving).await.unwrap();
 
-    custody.sender.send(task).await.unwrap();
+    prover_sender.send(task).await.unwrap();
 
     Ok(HttpResponse::Ok().json(TransferResponse {
         request_id: request_id.clone(),
@@ -176,10 +171,7 @@ pub async fn transaction_status<D: KeyValueDB>(
     _: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     let relayer_endpoint = custody.relayer_endpoint(request.0.request_id)?;
     let transaction_status = fetch_tx_status(&relayer_endpoint).await?;
@@ -196,10 +188,7 @@ pub async fn generate_shielded_address<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     let account = custody.account(account_id)?;
     let address = account.generate_address().await;
@@ -217,10 +206,7 @@ pub async fn history<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     custody.sync_account(account_id, &state).await?;
 

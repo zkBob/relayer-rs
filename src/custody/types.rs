@@ -9,11 +9,12 @@ use libzeropool::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use uuid::Uuid;
 use std::{fmt::Debug};
 
 use libzkbob_rs::libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait};
 
-use super::{account::Account, service::TransferStatus, tx_parser::DecMemo};
+use super::{account::Account, service::{TransferStatus, CustodyService}, tx_parser::DecMemo};
 
 #[derive(Serialize)]
 pub struct AccountShortInfo {
@@ -90,6 +91,7 @@ pub struct TransferRequest {
 #[derive(Clone)]
 pub struct ScheduledTask {
     pub request_id: String,
+    pub account_id: Uuid,
     pub db: Data< kvdb_rocksdb::Database>,
     pub request: TransferRequest,
     pub job_id: Option<Vec<u8>>,
@@ -99,8 +101,9 @@ pub struct ScheduledTask {
     pub status: TransferStatus,
     pub tx_hash: Option<String>,
     pub failure_reason: Option<String>,
-    pub account: Data<Account>,
-    pub params: Data<Parameters<Bn256>>
+    // pub account: Data<Account>,
+    pub params: Data<Parameters<Bn256>>,
+    pub custody: Data<RwLock<CustodyService>>
 }
 
 
