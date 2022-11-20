@@ -11,7 +11,7 @@ use std::{fmt::Debug};
 
 use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}, client::TransactionData};
 
-use super::{service::{TransferStatus, CustodyService}, tx_parser::DecMemo};
+use super::{service::TransferStatus, tx_parser::DecMemo};
 
 #[derive(Serialize)]
 pub struct AccountShortInfo {

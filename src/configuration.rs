@@ -168,7 +168,7 @@ pub fn get_config() -> Result<Settings, config::ConfigError> {
 pub enum Environment {
     Local,
     Production,
-    Kovan,
+    Staging,
     Mock,
     Anvil,
     Docker
@@ -178,7 +178,7 @@ impl Environment {
     fn as_str(&self) -> &'static str {
         match self {
             Environment::Local => "local.yaml",
-            Environment::Kovan => "kovan.yaml",
+            Environment::Staging => "staging.yaml",
             Environment::Production => "production.yaml",
             Environment::Mock => "mock.yaml",
             Environment::Anvil => "anvil.yaml",
@@ -194,7 +194,7 @@ impl TryFrom<String> for Environment {
         match s.to_lowercase().as_str() {
             "local" => Ok(Self::Local),
             "production" => Ok(Self::Production),
-            "kovan" => Ok(Self::Kovan),
+            "staging" => Ok(Self::Staging),
             "mock" => Ok(Self::Mock),
             "anvil" => Ok(Self::Anvil),
             "docker" => Ok(Self::Docker),
