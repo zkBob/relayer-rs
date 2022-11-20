@@ -1,4 +1,4 @@
-use std::{net::TcpListener, sync::RwLock};
+use std::{net::TcpListener,};
 
 use actix_cors::Cors;
 use actix_http::header;
@@ -9,21 +9,33 @@ use actix_web::{
     App, HttpServer,
 };
 use kvdb::KeyValueDB;
+use kvdb_rocksdb::Database;
+use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
+use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
-    custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::CustodyService},
+    custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::CustodyService, types::ScheduledTask},
     routes::{self, wallet_screening},
     state::State,
 };
+// use opentelemetry::{
+//     sdk::export::trace::
+// };
+use actix_web_opentelemetry::RequestTracing;
+
 
 pub fn run<D: 'static + KeyValueDB>(
     listener: TcpListener,
     state: Data<State<D>>,
     custody: Data<RwLock<CustodyService>>,
+    params: Data<Parameters<Bn256>>,
+    custody_db: Data<Database>,
+    prover_queue: Data<Sender<ScheduledTask>>
 ) -> Result<Server, std::io::Error> {
     tracing::info!("starting webserver");
 
     let server = HttpServer::new(move || {
+
         let cors = Cors::default()
             .allow_any_origin()
             .allowed_methods(vec!["GET", "POST"])
@@ -32,6 +44,7 @@ pub fn run<D: 'static + KeyValueDB>(
 
         App::new()
             .wrap(cors)
+            .wrap(RequestTracing::new())
             .wrap(middleware::Logger::default())
             .route("/tx", web::get().to(routes::query))
             .route("/info", web::get().to(routes::info::<D>))
@@ -59,6 +72,9 @@ pub fn run<D: 'static + KeyValueDB>(
             .route("/history", web::get().to(history::<D>))
             .app_data(state.clone())
             .app_data(custody.clone())
+            .app_data(params.clone())
+            .app_data(custody_db.clone())
+            .app_data(prover_queue.clone())
     })
     .listen(listener)?
     .run();

@@ -1,23 +1,17 @@
 use crate::state::State;
-use actix_web::{
-    web::Data,
-};
+use actix_web::web::Data;
 
 use ethabi::ethereum_types::{H256, U64};
 use libzeropool::{
-    constants,
-    fawkes_crypto::{
-        core::sizedvec::SizedVec,
-        ff_uint::Num,
-    },
-    native::tx::{TransferPub, TransferSec},
+    fawkes_crypto::{backend::bellman_groth16::{Parameters, engines::Bn256}},
 };
-
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use std::{fmt::Debug};
 
-use libzkbob_rs::libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait};
+use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}, client::TransactionData};
 
-use super::tx_parser::DecMemo;
+use super::{service::TransferStatus, tx_parser::DecMemo};
 
 #[derive(Serialize)]
 pub struct AccountShortInfo {
@@ -34,7 +28,7 @@ pub struct AccountDetailedInfo {
     pub sync_status: bool,
     pub total_balance: String,
     pub account_balance: String,
-    pub note_balance: String, 
+    pub note_balance: String,
 }
 
 pub enum HistoryDbColumn {
@@ -52,18 +46,18 @@ pub type Fs = <PoolParams as PoolParamsTrait>::Fs;
 
 pub type RelayerState<D> = Data<State<D>>;
 
-#[derive(Serialize)]
-struct TransactionData {
-    public: TransferPub<Fr>,
-    secret: TransferSec<Fr>,
-    #[serde(with = "hex")]
-    ciphertext: Vec<u8>,
-    // #[serde(with = "hex")]
-    memo: Vec<u8>,
-    commitment_root: Num<Fr>,
-    out_hashes: SizedVec<Num<Fr>, { constants::OUT + 1 }>,
-    parsed_delta: ParsedDelta,
-}
+// #[derive(Serialize)]
+// struct TransactionData {
+//     public: TransferPub<Fr>,
+//     secret: TransferSec<Fr>,
+//     #[serde(with = "hex")]
+//     ciphertext: Vec<u8>,
+//     // #[serde(with = "hex")]
+//     memo: Vec<u8>,
+//     commitment_root: Num<Fr>,
+//     out_hashes: SizedVec<Num<Fr>, { constants::OUT + 1 }>,
+//     parsed_delta: ParsedDelta,
+// }
 #[derive(Serialize)]
 struct ParsedDelta {
     v: i64,
@@ -81,13 +75,52 @@ pub struct AccountInfoRequest {
     pub id: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferRequest {
     pub request_id: Option<String>,
     pub account_id: String,
-    pub amount:u64,
+    pub amount: u64,
     pub to: String,
+
+    pub webhook: Option<String>,
+}
+// #[derive(Clone)]
+pub struct ScheduledTask {
+    pub request_id: String,
+    pub account_id: Uuid,
+    pub db: Data< kvdb_rocksdb::Database>,
+    // pub request: TransferRequest,
+    pub job_id: Option<Vec<u8>>,
+    pub endpoint: Option<String>,
+    pub relayer_url: String,
+    pub retries_left: u8,
+    pub status: TransferStatus,
+    pub tx_hash: Option<String>,
+    pub failure_reason: Option<String>,
+    // pub account: Data<Account>,
+    pub params: Data<Parameters<Bn256>>,
+    // pub custody: Data<RwLock<CustodyService>>
+    pub tx: TransactionData<Fr>
+}
+
+
+
+impl Debug for ScheduledTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScheduledTask")
+            .field("request_id", &self.request_id)
+            // .field("request", &self.request)
+            .field("job_id", &self.job_id)
+            .field("endpoint", &self.endpoint)
+            .field("relayer_url", &self.relayer_url)
+            .field("retries_left", &self.retries_left)
+            .field("status", &self.status)
+            .field("tx_hash", &self.tx_hash)
+            .field("failure_reason", &self.failure_reason)
+            
+            .finish()
+    }
 }
 
 #[derive(Serialize)]
@@ -114,7 +147,7 @@ pub enum HistoryTxType {
     Withdrawal,
     TransferIn,
     TransferOut,
-    TransferLoopback,
+    ReturnedChange,
 }
 
 #[derive(Serialize)]
@@ -138,8 +171,6 @@ pub struct HistoryRecord {
     pub block_num: U64,
 }
 
-
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferResponse {
@@ -155,12 +186,9 @@ pub struct TransferStatusRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionStatusResponse {
-    pub state: String,
+    pub status: TransferStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub failed_reason: Option<String>,
+    pub failure_reason: Option<String>,
 }
-
-
-

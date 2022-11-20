@@ -17,6 +17,7 @@ use libzeropool::{
 use libzkbob_rs::merkle::MerkleTree;
 use memo_parser::memoparser;
 use tokio::sync::mpsc::Sender;
+use tracing_futures::Instrument;
 use uuid::Uuid;
 use web3::types::BlockNumber;
 
@@ -85,8 +86,10 @@ impl<D: 'static + KeyValueDB> State<D> {
                     .collect();
                 tracing::debug!("mising indices: {:?}", missing_indices);
 
+                // TODO: implement batch retrieval and RPC fallback
                 let events = pool
                     .get_events(Some(BlockNumber::Earliest), Some(BlockNumber::Latest), None)
+                    .instrument(tracing::debug_span!("getting events from contract"))
                     .await
                     .unwrap();
 
@@ -95,10 +98,14 @@ impl<D: 'static + KeyValueDB> State<D> {
                     serde_json::to_string(&events).unwrap(),
                 )
                 .unwrap();
+
+                // let span = tracing::debug_span!("processing events");
+                // span.enter();
+                //TODO: combine all of the futures in a single one then wrap it all in a span with underlying spans 
                 for event in events.iter() {
                     let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
                     if let Some(tx_hash) = event.transaction_hash {
-                        if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
+                        if let Some(tx) = pool.get_transaction(tx_hash).instrument(tracing::debug_span!("getting transaction by hash", hash = tx_hash.to_string())).await.unwrap() {
                             let calldata = memoparser::parse_calldata(&tx.input.0, None)
                                 .expect("Calldata is invalid!");
                             

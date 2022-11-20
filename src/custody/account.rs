@@ -1,3 +1,4 @@
+use kvdb::KeyValueDB;
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
 use libzeropool::fawkes_crypto::rand::Rng;
@@ -12,16 +13,19 @@ use libzkbob_rs::{
 };
 use memo_parser::memo::TxType;
 use memo_parser::memoparser;
+use tokio::sync::RwLock;
 use std::fmt::Display;
 use std::str::FromStr;
-use std::sync::RwLock;
+
 use uuid::Uuid;
 
 use crate::contracts::Pool;
+use crate::custody::tx_parser::{self, ParseResult, TxParser, IndexedTx};
 use crate::custody::types::{HistoryTx, PoolParams};
 
+use super::errors::CustodyServiceError;
 use super::tx_parser::StateUpdate;
-use super::types::{HistoryDbColumn, HistoryRecord, HistoryTxType, AccountShortInfo};
+use super::types::{HistoryDbColumn, HistoryRecord, HistoryTxType, AccountShortInfo, RelayerState};
 
 pub enum DataType {
     Tree,
@@ -44,6 +48,8 @@ impl Display for DataType {
 pub fn data_file_path(base_path: &str, account_id: Uuid, data_type: DataType) -> String {
     format!("{}/{}/{}", base_path, account_id.as_hyphenated(), data_type)
 }
+
+
 pub struct Account {
     pub inner: RwLock<NativeUserAccount<kvdb_rocksdb::Database, PoolBN256>>,
     pub id: Uuid,
@@ -52,16 +58,86 @@ pub struct Account {
 }
 
 impl Account {
-    pub fn short_info(&self) -> AccountShortInfo {
-        let inner = self.inner.read().unwrap();
+
+    pub async fn sync<D:KeyValueDB>(&self, relayer_state: &RelayerState<D> ) -> Result<(), CustodyServiceError> {
+        let start_index = self.next_index().await;
+        let account_id = self.id;
+        let finalized_index = {
+            let finalized = relayer_state.finalized.lock().unwrap();
+            finalized.next_index()
+        };
+        tracing::info!(
+            "account {}, account_index = {}, finalized index = {} ",
+            account_id,
+            start_index,
+            finalized_index
+        );
+
+        // TODO: error instead of unwrap
+        let jobs = relayer_state
+            .get_jobs(start_index, finalized_index)
+            .unwrap();
+
+        let indexed_txs: Vec<IndexedTx> = jobs
+            .iter()
+            .map(|item| IndexedTx {
+                index: item.index,
+                memo: item.memo.clone(),
+                commitment: item.commitment,
+            })
+            .collect();
+
+        let job_indices: Vec<u64> = jobs.iter().map(|j| j.index).collect();
+
+        tracing::info!("jobs to sync {:#?}", job_indices);
+
+        let parse_result: ParseResult = TxParser::new().parse_native_tx(self.sk().await, indexed_txs);
+
+        tracing::info!(
+            "retrieved new_accounts: {:#?} \n new notes: {:#?}",
+            parse_result.state_update.new_accounts,
+            parse_result.state_update.new_notes
+        );
+        let decrypted_memos = parse_result.decrypted_memos;
+
+        let mut batch = self.history.transaction();
+        decrypted_memos.iter().for_each(|memo| {
+            let jobs = relayer_state.get_jobs(memo.index, 1).unwrap();
+            let job = jobs.first().unwrap();
+            let tx = job.transaction.as_ref().unwrap();
+
+            let record = HistoryRecord {
+                dec_memo: memo.clone(),
+                tx_hash: tx.hash,
+                calldata: tx.input.0.clone(),
+                block_num: tx.block_number.unwrap(),
+            };
+
+            batch.put_vec(
+                HistoryDbColumn::NotesIndex.into(),
+                &tx_parser::index_key(memo.index),
+                serde_json::to_vec(&record).unwrap(),
+            );
+        });
+
+        self.history.write(batch).unwrap();
+        tracing::info!("account {} saved history", account_id);
+
+        self.update_state(parse_result.state_update).await;
+        tracing::info!("account {} state updated", account_id);
+
+        Ok(())
+    }
+    pub async fn short_info(&self) -> AccountShortInfo {
+        let inner = self.inner.read().await;
         AccountShortInfo {
             id: self.id.to_string(),
             description: self.description.clone(),
             balance: inner.state.total_balance().to_string(),
         }
     }
-    pub fn update_state(&self, state_update: StateUpdate) {
-        let mut inner = self.inner.write().unwrap();
+    pub async fn update_state(&self, state_update: StateUpdate) {
+        let mut inner = self.inner.write().await;
         if !state_update.new_leafs.is_empty() || !state_update.new_commitments.is_empty() {
             inner
                 .state
@@ -83,18 +159,18 @@ impl Account {
         });
     }
 
-    pub fn next_index(&self) -> u64 {
-        let inner = self.inner.read().unwrap();
+    pub async fn next_index(&self) -> u64 {
+        let inner = self.inner.read().await;
         inner.state.tree.next_index()
     }
 
-    pub fn sk(&self) -> Num<Fs> {
-        let inner = self.inner.read().unwrap();
+    pub async fn sk(&self) -> Num<Fs> {
+        let inner = self.inner.read().await;
         inner.keys.sk
     }
 
-    pub fn generate_address(&self) -> String {
-        let inner = self.inner.read().unwrap();
+    pub async fn generate_address(&self) -> String {
+        let inner = self.inner.read().await;
         inner.generate_address()
     }
 
@@ -129,7 +205,7 @@ impl Account {
                             let amount = note.b.to_num();
                             let address = address::format_address::<PoolParams>(note.d, note.p_d);
                             (
-                                HistoryTxType::TransferLoopback,
+                                HistoryTxType::ReturnedChange,
                                 amount.to_string(),
                                 Some(address),
                             )

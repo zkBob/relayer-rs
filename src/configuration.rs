@@ -14,10 +14,70 @@ pub struct ApplicationSettings {
     pub host: String,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
+    pub telemetry: TelemetrySettings,
     pub tx: Tx,
     pub tree: Tree,
     
 }
+#[derive(Debug,Deserialize, Serialize, Clone)]
+pub enum TelemetryKind {
+    Stdout,
+    Jaeger
+}
+
+impl From<String> for TelemetryKind {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "stdout" => Self::Stdout,
+            "jaeger" => Self::Jaeger,
+            _ => Self::Stdout
+        }
+    }
+}
+#[derive(Debug,Deserialize, Serialize, Clone)]
+pub struct TelemetrySettings {
+    pub kind: TelemetryKind,
+    pub endpoint: Option<String>,
+    pub log_level: LogLevel
+}
+
+#[derive(Debug,Deserialize,Clone, Serialize, Copy)]
+pub enum LogLevel {
+    TRACE,
+    DEBUG,
+    INFO,
+    WARN,
+    ERROR
+}
+
+
+impl From<String> for LogLevel {
+    
+    fn from(s: String) -> Self {
+        match  s.as_str() {
+            "TRACE" => Self::TRACE,
+            "DEBUG" => Self::DEBUG,
+            "INFO" => Self::INFO,
+            "WARN" => Self::WARN,
+            "ERROR" => Self::ERROR,
+            _ => Self::INFO
+        }
+    }
+}
+
+impl Into<String> for LogLevel {
+    fn into(self) -> String {
+        match self {
+            LogLevel::TRACE => "TRACE",
+            LogLevel::DEBUG => "DEBUG",
+            LogLevel::INFO => "INFO",
+            LogLevel::WARN => "WARN",
+            LogLevel::ERROR => "ERROR",
+        }.to_string()
+    }
+}
+
+
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Credentials {
@@ -108,20 +168,21 @@ pub fn get_config() -> Result<Settings, config::ConfigError> {
 pub enum Environment {
     Local,
     Production,
-    Kovan,
+    Staging,
     Mock,
-    Anvil
+    Anvil,
+    Docker
 }
 
 impl Environment {
     fn as_str(&self) -> &'static str {
         match self {
             Environment::Local => "local.yaml",
-            Environment::Kovan => "kovan.yaml",
+            Environment::Staging => "staging.yaml",
             Environment::Production => "production.yaml",
             Environment::Mock => "mock.yaml",
             Environment::Anvil => "anvil.yaml",
-
+            Environment::Docker => "docker.yaml",
         }
     }
 }
@@ -133,9 +194,10 @@ impl TryFrom<String> for Environment {
         match s.to_lowercase().as_str() {
             "local" => Ok(Self::Local),
             "production" => Ok(Self::Production),
-            "kovan" => Ok(Self::Kovan),
+            "staging" => Ok(Self::Staging),
             "mock" => Ok(Self::Mock),
             "anvil" => Ok(Self::Anvil),
+            "docker" => Ok(Self::Docker),
             _other => Err(format!("failed to parse {}", s)),
         }
     }

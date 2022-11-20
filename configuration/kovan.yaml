@@ -1,5 +1,0 @@
-web3:
-  provider_endpoint: https://kovan.infura.io:443/v3/9a94d181b23846209f01161dcd0f9ad6
-  pool_address: 0x21873d8fe216e5c0eea4ae948d9768b64f38e89b
-  credentials:
-    secret_key: 6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c

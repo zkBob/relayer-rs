@@ -3,14 +3,29 @@ use actix_web::{
     HttpResponse,
 };
 use kvdb::KeyValueDB;
-use std::{str::FromStr, sync::RwLock};
+use kvdb_rocksdb::Database;
+use libzeropool::fawkes_crypto::{
+    backend::bellman_groth16::{engines::Bn256, Parameters},
+    ff_uint::{Num, NumRepr},
+};
+use libzkbob_rs::client::{TokenAmount, TransactionData, TxOutput, TxType};
+use std::str::FromStr;
+use tokio::sync::{mpsc::Sender, RwLock};
 use uuid::Uuid;
 
-use crate::{routes::job::JobResponse, state::State, types::job::Response, custody::types::TransferResponse, helpers::BytesRepr};
+use crate::{
+    custody::types::TransferResponse,
+    routes::job::JobResponse,
+    state::{State},
+};
 
 use super::{
-    service::CustodyService,
-    types::{AccountInfoRequest, SignupRequest, TransferRequest, GenerateAddressResponse, SignupResponse, ListAccountsResponse, TransferStatusRequest, TransactionStatusResponse}, errors::CustodyServiceError,
+    errors::CustodyServiceError,
+    service::{CustodyDbColumn, CustodyService, JobShortInfo, TransferStatus},
+    types::{
+        AccountInfoRequest, Fr, GenerateAddressResponse, ScheduledTask, SignupRequest,
+        SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest,
+    },
 };
 
 pub type Custody = Data<RwLock<CustodyService>>;
@@ -25,21 +40,19 @@ pub async fn account_info<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     state.sync().await.map_err(|_| {
         tracing::error!("failed to sync state");
         CustodyServiceError::StateSyncError
     })?;
 
-    custody.sync_account(account_id, &state)?;
+    custody.sync_account(account_id, &state).await?;
 
-    let account_info = custody.account_info(account_id).ok_or(
-        CustodyServiceError::AccountNotFound
-    )?;
+    let account_info = custody
+        .account_info(account_id)
+        .await
+        .ok_or(CustodyServiceError::AccountNotFound)?;
 
     Ok(HttpResponse::Ok().json(account_info))
 }
@@ -47,12 +60,12 @@ pub async fn account_info<D: KeyValueDB>(
 pub async fn signup<D: KeyValueDB>(
     request: Json<SignupRequest>,
     _state: Data<State<D>>,
-    custody: Custody,
+    custody: Data<RwLock<CustodyService>>,
+    _params: Data<Parameters<Bn256>>,
+    _custody_db: Data<Database>,
+    _prover_sender: Data<Sender<ScheduledTask>>,
 ) -> Result<HttpResponse, CustodyServiceError> {
-    let mut custody = custody.write().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let mut custody = custody.write().await;
 
     let account_id = custody.new_account(request.0.description);
 
@@ -65,24 +78,23 @@ pub async fn list_accounts<D: KeyValueDB>(
     state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
     state.sync().await.map_err(|_| {
         tracing::error!("failed to sync state");
         CustodyServiceError::StateSyncError
     })?;
-    
 
-    Ok(HttpResponse::Ok().json(custody.list_accounts()))
+    Ok(HttpResponse::Ok().json(custody.list_accounts().await))
 }
 
 pub async fn transfer<D: KeyValueDB>(
     request: Json<TransferRequest>,
-    state: Data<State<D>>,
+    _state: Data<State<D>>,
     custody: Custody,
+    params: Data<Parameters<Bn256>>,
+    custody_db: Data<Database>,
+    prover_sender: Data<Sender<ScheduledTask>>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let request: TransferRequest = request.0.into();
 
@@ -91,85 +103,77 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let relayer_url = custody.read().await.settings.relayer_url.clone();
+    // let account = custody.move_account(account_id).unwrap();
 
+    // custody.sync_account(account_id, &state)?;
+
+    // account.sync(&state).await?;
+    let request_id = request
+        .request_id
+        .clone()
+        .unwrap_or(Uuid::new_v4().to_string());
+    // if custody.get_job_id_by_request_id(&request_id)?.is_some() {
+    //     return Err(CustodyServiceError::DuplicateTransactionId);
+    // }
+
+    // request.request_id = Some(request_id.clone());
+
+    // custody.update_task_status(task.clone(), TransferStatus::New).await?;
+    // task.update_status(TransferStatus::Proving).await.unwrap();
+
+    let c = custody.read().await;
+    let account = c.account(account_id)?;
+    let account = account.inner.read().await;
+
+    let fee = 100000000;
+    let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
+
+    let tx_output: TxOutput<Fr> = TxOutput {
+        to: request.to.clone(),
+        amount: TokenAmount::new(Num::from_uint(NumRepr::from(request.amount)).unwrap()),
+    };
+    let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], vec![tx_output]);
+
+    let tx: TransactionData<Fr> = account
+        .create_tx(transfer, None, None)
+        .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))?;
+
+    let db = custody_db.clone();
+
+    ScheduledTask::save_new(custody_db, request_id.clone())?;
     
-    custody.sync_account(account_id, &state)?;
+    tracing::info!(
+        "{} request received & saved, tx created and sent to the prover queue",
+        &request_id
+    );
+    let task = ScheduledTask {
+        request_id: request_id.clone(),
+        account_id,
+        // request,
+        job_id: None,
+        endpoint: None,
+        retries_left: 42,
+        status: TransferStatus::Proving,
+        tx_hash: None,
+        failure_reason: None,
+        // account:Data::new(account),
+        relayer_url,
+        params,
+        db,
+        tx, // custody,
+    };
 
-
-    let request_id = request.request_id.clone().unwrap_or(Uuid::new_v4().to_string());
-    if custody.get_job_by_request_id(&request_id)?.is_some() {
-        return Err(CustodyServiceError::DuplicateTransactionId);
-    }
-
-    let transaction_request = vec![custody.transfer(request)?];
-
-    let relayer_endpoint = format!("{}/sendTransactions", custody.settings.relayer_url);
-
-    let response = reqwest::Client::new()
-        .post(relayer_endpoint)
-        .json(&transaction_request)
-        .header("Content-type", "application/json")
-        .send()
-        .await
-        .map_err(|e| {
-            tracing::error!(
-                "network exception when sending request to relayer: {:#?}",
-                e
-            );
-            CustodyServiceError::RelayerSendError
-        })?;
-
-    let response = response.error_for_status().map_err(|e| {
-        tracing::error!("relayer returned bad status code {:#?}", e);
-        CustodyServiceError::RelayerSendError
-    })?;
-
-    let response: Response = response.json().await.map_err(|e| {
-        tracing::error!("the relayer response was not JSON: {:#?}", e);
-        CustodyServiceError::RelayerSendError
-    })?;
-
-    // TODO: multitransfer
-    let nullifier = transaction_request[0].proof.inputs[1].bytes();
-    custody.save_nullifier(&request_id, nullifier).map_err(|err| {
-        tracing::error!("failed to save nullifier: {}", err);
-        CustodyServiceError::DataBaseWriteError
-    })?;
-
-    custody.save_job_id(&request_id, &response.job_id).map_err(|err| {
-        tracing::error!("failed to save job_id: {}", err);
-        CustodyServiceError::DataBaseWriteError
-    })?;
-
-    tracing::info!("relayer returned the job id: {:#?}", response.job_id);
+    prover_sender.send(task).await.unwrap();
 
     Ok(HttpResponse::Ok().json(TransferResponse {
-        request_id,
+        request_id: request_id.clone(),
     }))
 }
 
-pub async fn transaction_status<D: KeyValueDB>(
-    request: Query<TransferStatusRequest>,
-    _: Data<State<D>>,
-    custody: Custody,
-) -> Result<HttpResponse, CustodyServiceError> {
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
-
-    let transaction_id = &request.request_id;
-    let job_id = custody.get_job_by_request_id(transaction_id)?
-        .ok_or(
-            CustodyServiceError::TransactionNotFound
-        )?;
-
-    let relayer_endpoint = format!("{}/job/{}", custody.settings.relayer_url, job_id);
-
+pub async fn fetch_tx_status(
+    relayer_endpoint: &str,
+) -> Result<TransactionStatusResponse, CustodyServiceError> {
     let response = reqwest::Client::new()
         .get(relayer_endpoint)
         .send()
@@ -182,16 +186,43 @@ pub async fn transaction_status<D: KeyValueDB>(
             CustodyServiceError::RelayerSendError
         })?;
 
-    let response: JobResponse = response.json().await.map_err(|e| {
-        tracing::error!("the relayer response was not JSON: {:#?}", e);
-        CustodyServiceError::RelayerSendError
-    })?;
+    let body = response.text().await.unwrap();
 
-    Ok(HttpResponse::Ok().json(TransactionStatusResponse {
-        state: response.state,
-        tx_hash: response.tx_hash,
-        failed_reason: response.failed_reason,
-    }))
+    match serde_json::from_str::<JobResponse>(&body) {
+        Ok(response) => Ok(TransactionStatusResponse {
+            status: TransferStatus::from(response.state),
+            tx_hash: response.tx_hash,
+            failure_reason: response.failed_reason,
+        }),
+        Err(e) => {
+            tracing::error!("the relayer response {:#?} was not JSON: {:#?}", body, e);
+            Err(CustodyServiceError::RelayerSendError)
+        }
+    }
+}
+pub async fn transaction_status<D: KeyValueDB>(
+    request: Query<TransferStatusRequest>,
+    _: Data<State<D>>,
+    custody: Custody,
+) -> Result<HttpResponse, CustodyServiceError> {
+    let custody = custody.read().await;
+
+    let job = custody
+        .db
+        .get(
+            CustodyDbColumn::JobsIndex.into(),
+            &request.0.request_id.into_bytes(),
+        )
+        .map_err(|e| CustodyServiceError::DataBaseReadError)?
+        .ok_or(CustodyServiceError::TransactionNotFound)?;
+
+    let job: JobShortInfo =
+        serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+
+    // let relayer_endpoint = custody.relayer_endpoint(request.0.request_id)?;
+    // let transaction_status = fetch_tx_status(&relayer_endpoint).await?;
+
+    Ok(HttpResponse::Ok().json(job))
 }
 
 pub async fn generate_shielded_address<D: KeyValueDB>(
@@ -202,14 +233,11 @@ pub async fn generate_shielded_address<D: KeyValueDB>(
         tracing::error!("failed to parse account id: {}", err);
         CustodyServiceError::IncorrectAccountId
     })?;
-    
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+
+    let custody = custody.read().await;
 
     let account = custody.account(account_id)?;
-    let address = account.generate_address();
+    let address = account.generate_address().await;
 
     Ok(HttpResponse::Ok().json(GenerateAddressResponse { address }))
 }
@@ -224,15 +252,16 @@ pub async fn history<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody = custody.read().map_err(|_| {
-        tracing::error!("failed to lock custody service");
-        CustodyServiceError::CustodyLockError
-    })?;
+    let custody = custody.read().await;
 
-    custody.sync_account(account_id, &state)?;
+    custody.sync_account(account_id, &state).await?;
 
     let account = custody.account(account_id)?;
-    let txs = account.history(&state.pool, |nullifier: Vec<u8>| custody.get_transaction_id(nullifier)).await;
+    let txs = account
+        .history(&state.pool, |nullifier: Vec<u8>| {
+            custody.get_request_id(nullifier)
+        })
+        .await;
 
     Ok(HttpResponse::Ok().json(txs))
 }

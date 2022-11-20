@@ -1,0 +1,15 @@
+application:
+  host: 0.0.0.0
+  port: 8001
+   tx:
+    vk: params/transfer_verification_key.json
+    params: params/transfer_params.bin
+  tree:
+    params: params/tree_params.bin
+web3:
+  provider_endpoint: https://rpc.sepolia.dev
+  pool_address: e982E462b094850F12AF94d21D470e21bE9D0E9C
+custody:
+  db_path: ./custody_db
+  relayer_url: http://localhost:8000
+  sync_interval_sec: 30
