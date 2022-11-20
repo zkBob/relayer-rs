@@ -51,7 +51,7 @@ pub async fn job<D: KeyValueDB>(
         tx_hash: None,
         failed_reason: None,
         created_on: job.created.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis(),
-        finished_on: 0, // TODO: Add finished in job //job.finished.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
+        finished_on: None, // TODO: Add finished in job //job.finished.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
     };
 
     if job.transaction.is_some() {
