@@ -807,9 +807,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.11"
+version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f916dfc5d356b0ed9dae65f1db9fc9770aa2851d2662b988ccf4fe3516e86348"
+checksum = "96bf8df95e795db1a4aca2957ad884a2df35413b24bbeb3114422f3cc21498e8"
 dependencies = [
  "autocfg",
  "cfg-if 1.0.0",
@@ -820,9 +820,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-utils"
-version = "0.8.12"
+version = "0.8.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edbafec5fa1f196ca66527c1b12c2ec4745ca14b50f1ad8f9f6f720b55d11fac"
+checksum = "422f23e724af1240ec469ea1e834d87a4b59ce2efe2c6a96256b0c47e2fd86aa"
 dependencies = [
  "cfg-if 1.0.0",
 ]
@@ -1764,9 +1764,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5bbe824c507c5da5956355e86a746d82e0e1464f65d862cc5e71da70e94b2c"
 dependencies = [
  "cfg-if 1.0.0",
- "js-sys",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -1875,24 +1872,6 @@ dependencies = [
  "regex",
  "rocksdb",
  "smallvec",
-]
-
-[[package]]
-name = "kvdb-web"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb1e98ba343d0b35f9009a8844cd2b87fa3192f7e79033ac05b00aeae0f3b0b5"
-dependencies = [
- "futures",
- "js-sys",
- "kvdb",
- "kvdb-memorydb",
- "log",
- "parity-util-mem",
- "parking_lot 0.11.2",
- "send_wrapper",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -2091,9 +2070,9 @@ dependencies = [
 
 [[package]]
 name = "memoffset"
-version = "0.6.5"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
+checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
 dependencies = [
  "autocfg",
 ]
@@ -2841,11 +2820,10 @@ dependencies = [
 
 [[package]]
 name = "rayon"
-version = "1.5.3"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd99e5772ead8baa5215278c9b15bf92087709e9c1b2d1f97cdb5a183c933a7d"
+checksum = "1e060280438193c554f654141c9ea9417886713b7acd75974c85b18a69a88e0b"
 dependencies = [
- "autocfg",
  "crossbeam-deque",
  "either",
  "rayon-core",
@@ -2853,9 +2831,9 @@ dependencies = [
 
 [[package]]
 name = "rayon-core"
-version = "1.9.3"
+version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "258bcdb5ac6dad48491bb2992db6b7cf74878b0384908af124823d118c99683f"
+checksum = "cac410af5d00ab6884528b4ab69d1e8e146e8d471201800fa1b4524126de6ad3"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-deque",
@@ -2947,7 +2925,6 @@ dependencies = [
  "kvdb",
  "kvdb-memorydb",
  "kvdb-rocksdb",
- "kvdb-web",
  "libzeropool",
  "libzkbob-rs",
  "memo-parser",
@@ -3212,12 +3189,6 @@ name = "semver"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e25dfac463d778e353db5be2449d1cce89bd6fd23c9f1ea21310ce6e5a1b29c4"
-
-[[package]]
-name = "send_wrapper"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "930c0acf610d3fdb5e2ab6213019aaa04e227ebe9547b0649ba599b16d788bd7"
 
 [[package]]
 name = "serde"
@@ -3656,9 +3627,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.21.2"
+version = "1.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9e03c497dc955702ba729190dc4aac6f2a0ce97f913e5b1b5912fc5039d9099"
+checksum = "d76ce4a75fb488c605c54bf610f221cea8b0dafb53333c1a67e8ee199dcd2ae3"
 dependencies = [
  "autocfg",
  "bytes",

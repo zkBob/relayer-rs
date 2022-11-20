@@ -5,7 +5,6 @@ use crate::{
         types::{HistoryDbColumn, HistoryRecord},
     },
     helpers::BytesRepr,
-    routes::job::JobResponse,
     state::State,
     types::{
         job::Response,
@@ -24,12 +23,10 @@ use libzeropool::{
 use memo_parser::memo::TxType as MemoTxType;
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
-    sync::RwLock,
-    thread,
+    fs, thread,
     time::{Duration, SystemTime},
 };
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{info_span, Instrument};
 use uuid::Uuid;
 
@@ -38,16 +35,12 @@ use super::{
     config::CustodyServiceSettings,
     errors::CustodyServiceError,
     tx_parser::{self, IndexedTx, TxParser},
-    types::{
-        AccountDetailedInfo, AccountShortInfo, Fr, RelayerState, ScheduledTask,
-        TransactionStatusResponse, TransferRequest,
-    },
+    types::{AccountShortInfo, Fr, RelayerState, ScheduledTask, TransactionStatusResponse},
 };
 use libzkbob_rs::{
-    client::{TokenAmount, TxOutput, TxType},
+    client::{TokenAmount, TxType},
     proof::prove_tx,
 };
-use std::str::FromStr;
 
 pub enum CustodyDbColumn {
     JobsIndex,
@@ -96,6 +89,16 @@ pub struct JobShortInfo {
     tx_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     failure_reason: Option<String>,
+}
+
+impl JobShortInfo {
+    pub fn new() -> Self {
+        Self {
+            status: TransferStatus::New,
+            tx_hash: None,
+            failure_reason: None,
+        }
+    }
 }
 
 pub fn start_prover(
@@ -499,6 +502,22 @@ impl CustodyService {
 }
 
 impl ScheduledTask {
+    // pub fn new(request_id: String, account_id: String, db: Data<Database>, relayer_url: String, params: Data<Parameters<Bn256>> ) -> Self {
+    //     Self {
+    //         request_id,
+    //         account_id ,
+    //         db,
+    //         job_id: None,
+    //         endpoint: None,
+    //         relayer_url,
+    //         retries_left: 42,
+    //         status : TransferStatus::Newew,
+    //         tx_hash: None,
+    //         failure_reason: None,
+    //         params,
+    //         tx: todo!(),
+    //     }
+    // }
     pub async fn fetch_status_with_retries(&mut self) -> Result<(), CustodyServiceError> {
         tracing::info!(
             "fetchin status for task {}, retries left {}",
@@ -657,6 +676,20 @@ impl ScheduledTask {
         Ok(())
     }
 
+    pub fn save_new(db: Data<Database>, request_id: String) -> Result<(), CustodyServiceError> {
+        let mut save_new_task = db.transaction();
+
+        save_new_task.put(
+            CustodyDbColumn::JobsIndex.into(),
+            request_id.as_bytes(),
+            &serde_json::to_vec(&JobShortInfo::new()).unwrap(),
+        );
+
+        db.write(save_new_task)
+            .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))?;
+
+        Ok(())
+    }
     pub async fn update_status(
         &mut self,
         status: TransferStatus,

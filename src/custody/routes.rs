@@ -13,7 +13,11 @@ use std::str::FromStr;
 use tokio::sync::{mpsc::Sender, RwLock};
 use uuid::Uuid;
 
-use crate::{custody::types::TransferResponse, routes::job::JobResponse, state::State};
+use crate::{
+    custody::types::TransferResponse,
+    routes::job::JobResponse,
+    state::{State},
+};
 
 use super::{
     errors::CustodyServiceError,
@@ -135,8 +139,12 @@ pub async fn transfer<D: KeyValueDB>(
         .create_tx(transfer, None, None)
         .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))?;
 
+    let db = custody_db.clone();
+
+    ScheduledTask::save_new(custody_db, request_id.clone())?;
+    
     tracing::info!(
-        "request {} received, created tx and sent to prover",
+        "{} request received & saved, tx created and sent to the prover queue",
         &request_id
     );
     let task = ScheduledTask {
@@ -152,9 +160,10 @@ pub async fn transfer<D: KeyValueDB>(
         // account:Data::new(account),
         relayer_url,
         params,
-        db: custody_db,
+        db,
         tx, // custody,
     };
+
     prover_sender.send(task).await.unwrap();
 
     Ok(HttpResponse::Ok().json(TransferResponse {
@@ -177,7 +186,6 @@ pub async fn fetch_tx_status(
             CustodyServiceError::RelayerSendError
         })?;
 
-    
     let body = response.text().await.unwrap();
 
     match serde_json::from_str::<JobResponse>(&body) {
@@ -187,8 +195,7 @@ pub async fn fetch_tx_status(
             failure_reason: response.failed_reason,
         }),
         Err(e) => {
-            
-            tracing::error!("the relayer response {:#?} was not JSON: {:#?}",body, e);
+            tracing::error!("the relayer response {:#?} was not JSON: {:#?}", body, e);
             Err(CustodyServiceError::RelayerSendError)
         }
     }

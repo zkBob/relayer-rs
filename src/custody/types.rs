@@ -3,18 +3,15 @@ use actix_web::web::Data;
 
 use ethabi::ethereum_types::{H256, U64};
 use libzeropool::{
-    constants,
-    fawkes_crypto::{core::sizedvec::SizedVec, ff_uint::Num, backend::bellman_groth16::{Parameters, engines::Bn256}},
-    native::tx::{TransferPub, TransferSec},
+    fawkes_crypto::{backend::bellman_groth16::{Parameters, engines::Bn256}},
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
 use uuid::Uuid;
 use std::{fmt::Debug};
 
 use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}, client::TransactionData};
 
-use super::{account::Account, service::{TransferStatus, CustodyService}, tx_parser::DecMemo};
+use super::{service::{TransferStatus, CustodyService}, tx_parser::DecMemo};
 
 #[derive(Serialize)]
 pub struct AccountShortInfo {
