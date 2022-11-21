@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::{
     custody::types::TransferResponse,
     routes::job::JobResponse,
-    state::{State},
+    state::State
 };
 
 use super::{
@@ -41,11 +41,6 @@ pub async fn account_info<D: KeyValueDB>(
     })?;
 
     let custody = custody.read().await;
-
-    state.sync().await.map_err(|_| {
-        tracing::error!("failed to sync state");
-        CustodyServiceError::StateSyncError
-    })?;
 
     custody.sync_account(account_id, &state).await?;
 
@@ -75,16 +70,10 @@ pub async fn signup<D: KeyValueDB>(
 }
 
 pub async fn list_accounts<D: KeyValueDB>(
-    state: Data<State<D>>,
+    _state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
-
-    state.sync().await.map_err(|_| {
-        tracing::error!("failed to sync state");
-        CustodyServiceError::StateSyncError
-    })?;
-
     Ok(HttpResponse::Ok().json(custody.list_accounts().await))
 }
 
@@ -200,6 +189,7 @@ pub async fn fetch_tx_status(
         }
     }
 }
+
 pub async fn transaction_status<D: KeyValueDB>(
     request: Query<TransferStatusRequest>,
     _: Data<State<D>>,
