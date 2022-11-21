@@ -1,15 +1,15 @@
 application:
   host: 0.0.0.0
   port: 8001
-   tx:
+  tx:
     vk: params/transfer_verification_key.json
     params: params/transfer_params.bin
   tree:
     params: params/tree_params.bin
 web3:
-  provider_endpoint: https://rpc.sepolia.dev
-  pool_address: e982E462b094850F12AF94d21D470e21bE9D0E9C
+  provider_endpoint: https://rpc.sepolia.org
+  pool_address: 3bd088C19960A8B5d72E4e01847791BD0DD1C9E6
 custody:
   db_path: ./custody_db
-  relayer_url: http://localhost:8000
+  relayer_url: https://relayer.thgkjlr.website
   sync_interval_sec: 30

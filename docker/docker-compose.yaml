@@ -6,9 +6,9 @@ services:
     container_name: zkbob-cloud
     volumes: 
       - ../params:/app/params/
-      - ../configuration/docker.yaml:/app/configuration/docker.yaml
+      - ../configuration/staging.yaml:/app/configuration/staging.yaml
     environment:
-      APP_ENVIRONMENT: 'docker'
+      APP_ENVIRONMENT: 'staging'
       RUST_LOG: "info"
       RUST_BACKTRACE: 1
     ports:

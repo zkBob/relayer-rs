@@ -4,6 +4,7 @@ use std::{
 };
 
 use actix_web::web::{self, Data};
+use ethabi::ethereum_types::U64;
 use kvdb::{DBOp::Insert, DBTransaction, KeyValueDB, DBKey};
 use libzeropool::{
     constants::OUT,
@@ -16,6 +17,7 @@ use libzeropool::{
 };
 use libzkbob_rs::merkle::MerkleTree;
 use memo_parser::memoparser;
+use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 use tracing_futures::Instrument;
 use uuid::Uuid;
@@ -51,8 +53,9 @@ pub enum JobsDbColumn {
     Jobs = 0,
     JobsIndex = 1,
     Nullifiers = 2,
-    TxCheckTasks = 3 // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective, 
+    TxCheckTasks = 3, // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective, 
                      //so we copy only those keys that require transaction receipt check
+    SyncedBlockIndex = 4,
 }
 
 pub struct State<D: 'static + KeyValueDB> {
@@ -75,20 +78,36 @@ impl<D: 'static + KeyValueDB> State<D> {
             let (contract_index, contract_root) = pool.root().await?;
             let local_finalized_root = finalized.get_root();
             let local_finalized_index = finalized.next_index();
-            tracing::debug!("local root {}", local_finalized_root.to_string());
-            tracing::debug!("contract root {}", contract_root.to_string());
+            tracing::info!("local root {}", local_finalized_root.to_string());
+            tracing::info!("contract root {}", contract_root.to_string());
 
             if !local_finalized_root.eq(&contract_root) {
                 let missing_indices: Vec<u64> = (local_finalized_index..contract_index.as_u64())
                     .step_by(OUT + 1)
                     .into_iter()
-                    .map(|i| local_finalized_index + (i + 1) * (OUT as u64 + 1))
+                    .map(|i| i)
                     .collect();
-                tracing::debug!("mising indices: {:?}", missing_indices);
+                tracing::info!("mising indices: {:?}", missing_indices);
+
+                let from_block = {
+                    self.jobs
+                        .get(JobsDbColumn::SyncedBlockIndex as u32, "last_block".as_bytes())
+                        .ok()
+                        .flatten()
+                        .map(|from_block| {
+                            BlockNumber::Number(U64::from_big_endian(&from_block))
+                        })
+                }.or(Some(BlockNumber::Earliest));
+                
+                let to_block = pool.block_number().await.map_err(|err| {
+                    SyncError::GeneralError(format!("failed to get block number: {}", err))
+                })?;
+                
+                tracing::info!("sync blocks from: {:?}, to: {}", from_block.clone().unwrap(), to_block);
 
                 // TODO: implement batch retrieval and RPC fallback
                 let events = pool
-                    .get_events(Some(BlockNumber::Earliest), Some(BlockNumber::Latest), None)
+                    .get_events(from_block, Some(BlockNumber::Number(to_block)), None)
                     .instrument(tracing::debug_span!("getting events from contract"))
                     .await
                     .unwrap();
@@ -169,7 +188,14 @@ impl<D: 'static + KeyValueDB> State<D> {
                         }
                     }
                 }
+            
+                self.jobs.write({
+                    let mut tx = self.jobs.transaction();
+                    tx.put(JobsDbColumn::SyncedBlockIndex as u32, "last_block".as_bytes(), &to_block.as_u64().to_be_bytes());
+                    tx
+                }).unwrap();
             }
+
 
             tracing::info!(
                 "local finalized root after sync {:#?}, index : {}",
