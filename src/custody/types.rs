@@ -6,12 +6,13 @@ use libzeropool::{
     fawkes_crypto::{backend::bellman_groth16::{Parameters, engines::Bn256}},
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 use std::{fmt::Debug};
 
 use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}, client::TransactionData};
 
-use super::{service::TransferStatus, tx_parser::DecMemo};
+use super::{service::{TransferStatus, JobStatusCallback}, tx_parser::DecMemo};
 
 #[derive(Serialize)]
 pub struct AccountShortInfo {
@@ -98,10 +99,12 @@ pub struct ScheduledTask {
     pub status: TransferStatus,
     pub tx_hash: Option<String>,
     pub failure_reason: Option<String>,
+    pub callback_address: Option<String>,
     // pub account: Data<Account>,
     pub params: Data<Parameters<Bn256>>,
     // pub custody: Data<RwLock<CustodyService>>
-    pub tx: TransactionData<Fr>
+    pub tx: TransactionData<Fr>,
+    pub callback_sender: Data<Sender<JobStatusCallback>>
 }
 
 

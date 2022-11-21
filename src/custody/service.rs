@@ -24,7 +24,8 @@ use memo_parser::memo::TxType as MemoTxType;
 use serde::{Deserialize, Serialize};
 use std::{
     fs, thread,
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+    u64,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{info_span, Instrument};
@@ -79,7 +80,7 @@ impl From<String> for TransferStatus {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct JobShortInfo {
     // request_id: String,
     // #[serde(skip)]
@@ -91,6 +92,14 @@ pub struct JobShortInfo {
     failure_reason: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct JobStatusCallback {
+    request_id: String,
+    job_status_info: JobShortInfo,
+    retries_left: u8,
+    timestamp: u64,
+    endpoint: String,
+}
 impl JobShortInfo {
     pub fn new() -> Self {
         Self {
@@ -98,6 +107,61 @@ impl JobShortInfo {
             tx_hash: None,
             failure_reason: None,
         }
+    }
+}
+
+pub fn start_callback_sender(
+    mut callback_receiver: Receiver<JobStatusCallback>,
+    retry_queue: Sender<JobStatusCallback>,
+) {
+    tokio::spawn(async move {
+        while let Some(job_status_callback) = callback_receiver.recv().await {
+            callback_with_retries(job_status_callback, retry_queue.clone()).await;
+        }
+    });
+}
+
+pub async fn callback_with_retries(
+    mut job_status_callback: JobStatusCallback,
+    retry_queue: Sender<JobStatusCallback>,
+) {
+    
+    tracing::debug!("trying to deliver callback for request {}", &job_status_callback.request_id);
+
+    let client = reqwest::Client::new();
+
+    let body = serde_json::to_vec(&job_status_callback.job_status_info).unwrap();
+
+    let resp = client
+        .post(&job_status_callback.endpoint)
+        .body(body)
+        .send()
+        .await;
+
+    // if !resp.is_ok_and(|r| r.error_for_status().is_ok())  --> this is unstable
+    if let Ok(r) = resp {
+        if r.error_for_status().is_ok() {
+            tracing::debug!(
+                " request {} callback delivered",
+                job_status_callback.request_id
+            );
+            return ();
+        } else {
+            tracing::debug!(
+                "{} got bad status code from callback endpoint, will try again {} times",
+                job_status_callback.request_id,
+                job_status_callback.retries_left
+            );
+        }
+    }
+    if job_status_callback.retries_left > 0 {
+        job_status_callback.retries_left -= 1;
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            retry_queue.send(job_status_callback).await.unwrap();
+        });
+    } else {
+    tracing::debug!("retries exhausted for callback {} ", job_status_callback.request_id);
     }
 }
 
@@ -229,77 +293,6 @@ impl CustodyService {
             None => None,
         }
     }
-
-    pub async fn webhook_callback_with_retries(task: ScheduledTask, queue: Sender<ScheduledTask>) {
-        let client = reqwest::Client::new();
-
-        let endpoint = task.endpoint.as_ref().unwrap();
-
-        // let retry_task = task.clone();
-        let body = serde_json::to_vec(&TransactionStatusResponse {
-            status: task.status.clone(),
-            tx_hash: task.tx_hash.clone(),
-            failure_reason: task.failure_reason.clone(),
-        })
-        .unwrap();
-
-        match client.post(endpoint).body(body).send().await {
-            Ok(resp) => {
-                if resp.error_for_status().is_err() {
-                    tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(30)).await;
-                        queue.send(task).await.unwrap();
-                    })
-                    .await
-                    .unwrap();
-                }
-            }
-            Err(_) => tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(30)).await;
-                queue.send(task).await.unwrap();
-            })
-            .await
-            .unwrap(),
-        }
-    }
-
-    // pub fn transfer(
-    //     &self,
-    //     request: TransferRequest,
-    // ) -> Result<TransactionRequest, CustodyServiceError> {
-    //     let account_id = Uuid::from_str(&request.account_id).unwrap();
-    //     let account = self.account(account_id)?;
-    //     let account = account.inner.read().unwrap();
-
-    //     let fee = 100000000;
-    //     let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
-
-    //     let tx_output: TxOutput<Fr> = TxOutput {
-    //         to: request.to,
-    //         amount: TokenAmount::new(Num::from_uint(NumRepr::from(request.amount)).unwrap()),
-    //     };
-    //     let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], vec![tx_output]);
-
-    //     let tx = account.create_tx(transfer, None, None).unwrap();
-    //     let (inputs, proof) = prove_tx(
-    //         &self.params,
-    //         &*libzeropool::POOL_PARAMS,
-    //         tx.public,
-    //         tx.secret,
-    //     );
-
-    //     let proof = Proof { inputs, proof };
-
-    //     let tx_request = TransactionRequest {
-    //         uuid: Some(Uuid::new_v4().to_string()),
-    //         proof,
-    //         memo: hex::encode(tx.memo),
-    //         tx_type: format!("{:0>4}", MemoTxType::Transfer.to_u32()),
-    //         deposit_signature: None,
-    //     };
-
-    //     Ok(tx_request)
-    // }
 
     pub async fn deposit(
         &self,
@@ -501,6 +494,31 @@ impl CustodyService {
     }
 }
 
+impl JobStatusCallback {
+    pub async fn callback_with_retries(
+        self,
+        endpoint: String,
+        retry_queue: Sender<JobStatusCallback>,
+    ) {
+        let client = reqwest::Client::new();
+
+        // let retry_task = task.clone();
+        let body = serde_json::to_vec(&self.job_status_info).unwrap();
+
+        let resp = client.post(endpoint).body(body).send().await;
+
+        // if !resp.is_ok_and(|r| r.error_for_status().is_ok())  --> this is unstable
+        if let Ok(r) = resp {
+            if r.error_for_status().is_ok() {
+                return ();
+            }
+        }
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            retry_queue.send(self).await.unwrap();
+        });
+    }
+}
 impl ScheduledTask {
     // pub fn new(request_id: String, account_id: String, db: Data<Database>, relayer_url: String, params: Data<Parameters<Bn256>> ) -> Self {
     //     Self {
@@ -694,18 +712,19 @@ impl ScheduledTask {
         &mut self,
         status: TransferStatus,
     ) -> Result<(), CustodyServiceError> {
+        let job_status_info = JobShortInfo {
+            // job_id: self.job_id.clone(),
+            status: status.clone(),
+            tx_hash: self.tx_hash.clone(),
+            failure_reason: self.failure_reason.clone(),
+        };
+
         let tx = {
             let mut tx = self.db.transaction();
             tx.put(
                 CustodyDbColumn::JobsIndex.into(),
                 self.request_id.as_bytes(),
-                &serde_json::to_vec(&JobShortInfo {
-                    // job_id: self.job_id.clone(),
-                    status: status.clone(),
-                    tx_hash: self.tx_hash.clone(),
-                    failure_reason: self.failure_reason.clone(),
-                })
-                .unwrap(),
+                &serde_json::to_vec(&job_status_info).unwrap(),
             );
             tx
         };
@@ -713,14 +732,21 @@ impl ScheduledTask {
             .write(tx)
             .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))?;
 
-        // if webhook_task.endpoint.is_some() {
-        //     match status {
-        //         TransferStatus::Done | TransferStatus::Failed(_) => {
-        //             self.webhook_sender.send(webhook_task).await.unwrap()
-        //         }
-        //         _ => (),
-        //     }
-        // }
+        if let Some(endpoint) = self.callback_address.clone() {
+            let job_status_callback = JobStatusCallback {
+                request_id: self.request_id.clone(),
+                endpoint,
+                job_status_info,
+                retries_left: 42,
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            };
+
+            self.callback_sender.send(job_status_callback).await.unwrap();
+            
+        }
 
         Ok(())
     }
