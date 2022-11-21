@@ -6,7 +6,6 @@ services:
     container_name: zkbob-cloud
     volumes: 
       - ../params:/app/params/
-      - ../configuration/base.yaml:/app/configuration/base.yaml
       - ../configuration/docker.yaml:/app/configuration/docker.yaml
     environment:
       APP_ENVIRONMENT: 'docker'
