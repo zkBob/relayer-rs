@@ -29,6 +29,7 @@ COPY --from=builder /app/docker/run.sh /app/run.sh
 COPY --from=builder /app/target/release/relayer-rs /usr/local/bin
 COPY --from=builder /usr/local/cargo/bin/bunyan /usr/local/bin
 
+RUN apt-get update && apt-get install -y ca-certificates && apt-get clean
 RUN mkdir -p /app/tests/data
 
 CMD ["./run.sh"]
