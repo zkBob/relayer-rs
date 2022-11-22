@@ -97,7 +97,12 @@ impl<D: 'static + KeyValueDB> State<D> {
                         .map(|from_block| {
                             BlockNumber::Number(U64::from_big_endian(&from_block))
                         })
-                }.or(Some(BlockNumber::Earliest));
+                }
+                .or(
+                    self.settings.web3.start_block
+                        .map(|block_num| BlockNumber::Number(U64::from(block_num)))
+                )
+                .or(Some(BlockNumber::Earliest));
                 
                 let to_block = pool.block_number().await.map_err(|err| {
                     SyncError::GeneralError(format!("failed to get block number: {}", err))

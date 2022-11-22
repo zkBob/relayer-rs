@@ -9,6 +9,7 @@ application:
 web3:
   provider_endpoint: https://rpc.sepolia.org
   pool_address: 3bd088C19960A8B5d72E4e01847791BD0DD1C9E6
+  start_block: 1793710
 custody:
   db_path: ./custody_db
   relayer_url: https://relayer.thgkjlr.website
