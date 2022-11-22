@@ -1,3 +1,4 @@
+use ethabi::ethereum_types::{U64, U256};
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
@@ -241,7 +242,7 @@ impl Account {
 
             let transaction_id = get_transaction_id(nullifier).ok();
 
-            let timestamp = pool.block_timestamp(tx.block_num).await.unwrap();
+            let timestamp = self.block_timestamp(pool, tx.block_num).await;
             for (tx_type, amount, to) in history_records {
                 history.push(HistoryTx {
                     tx_hash: format!("{:#x}", tx.tx_hash),
@@ -300,7 +301,7 @@ impl Account {
             description,
             history: kvdb_rocksdb::Database::open(
                 &DatabaseConfig {
-                    columns: 1,
+                    columns: 2,
                     ..Default::default()
                 },
                 &data_file_path(base_path, id, DataType::History),
@@ -350,12 +351,50 @@ impl Account {
             description,
             history: kvdb_rocksdb::Database::open(
                 &DatabaseConfig {
-                    columns: 1,
+                    columns: 2,
                     ..Default::default()
                 },
                 &data_file_path(base_path, id, DataType::History),
             )
             .unwrap(),
         })
+    }
+
+    async fn block_timestamp(&self, pool: &Pool, block_number: U64) -> U256 {
+        let timestamp = self.history
+            .get(
+                HistoryDbColumn::BlockTimestampsCache.into(), 
+                &block_number.as_u64().to_be_bytes()
+            )
+            .ok()
+            .flatten()
+            .map(|bytes| {
+                U256::from_big_endian(&bytes)
+            });
+
+        match timestamp {
+            Some(timestamp) => timestamp,
+            None => {
+                let timestamp = pool.block_timestamp(block_number).await;
+                match timestamp {
+                    Ok(timestamp) => {
+                        self.history.write({
+                            let mut timestamp_bytes = [0; 32];
+                            timestamp.to_big_endian(&mut timestamp_bytes);
+                            
+                            let mut tx = self.history.transaction();
+                            tx.put(
+                                HistoryDbColumn::BlockTimestampsCache.into(), 
+                                &block_number.as_u64().to_be_bytes(), 
+                                &timestamp_bytes
+                            );
+                            tx
+                        }).unwrap();
+                        timestamp
+                    }
+                    Err(_) => Default::default()
+                }
+            }
+        }
     }
 }

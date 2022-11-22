@@ -33,6 +33,7 @@ pub struct AccountDetailedInfo {
 
 pub enum HistoryDbColumn {
     NotesIndex,
+    BlockTimestampsCache
 }
 
 impl Into<u32> for HistoryDbColumn {
