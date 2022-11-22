@@ -4,9 +4,6 @@ use actix_web::{
 };
 use kvdb::KeyValueDB;
 
-use tracing::instrument::WithSubscriber;
-use tracing_futures::Instrument;
-
 use crate::{
     state::State,
     types::{

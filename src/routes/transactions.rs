@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::{
     helpers::BytesRepr,
-    state::{State}, types::job::JobStatus,
+    state::State, types::job::JobStatus,
 };
 
 use super::ServiceError;

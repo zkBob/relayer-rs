@@ -79,7 +79,7 @@ pub async fn list_accounts<D: KeyValueDB>(
 
 pub async fn transfer<D: KeyValueDB>(
     request: Json<TransferRequest>,
-    _state: Data<State<D>>,
+    state: Data<State<D>>,
     custody: Custody,
     params: Data<Parameters<Bn256>>,
     custody_db: Data<Database>,
@@ -92,27 +92,19 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let relayer_url = custody.read().await.settings.relayer_url.clone();
-    // let account = custody.move_account(account_id).unwrap();
-
-    // custody.sync_account(account_id, &state)?;
-
-    // account.sync(&state).await?;
+    let custody = custody.read().await;
+    let relayer_url = custody.settings.relayer_url.clone();
+    custody.sync_account(account_id, &state).await?;
+    
     let request_id = request
         .request_id
         .clone()
         .unwrap_or(Uuid::new_v4().to_string());
-    // if custody.get_job_id_by_request_id(&request_id)?.is_some() {
-    //     return Err(CustodyServiceError::DuplicateTransactionId);
-    // }
+    if custody.has_request_id(&request_id)? {
+        return Err(CustodyServiceError::DuplicateTransactionId);
+    }
 
-    // request.request_id = Some(request_id.clone());
-
-    // custody.update_task_status(task.clone(), TransferStatus::New).await?;
-    // task.update_status(TransferStatus::Proving).await.unwrap();
-
-    let c = custody.read().await;
-    let account = c.account(account_id)?;
+    let account = custody.account(account_id)?;
     let account = account.inner.read().await;
 
     let fee = 100000000;
@@ -139,14 +131,12 @@ pub async fn transfer<D: KeyValueDB>(
     let task = ScheduledTask {
         request_id: request_id.clone(),
         account_id,
-        // request,
         job_id: None,
         endpoint: None,
         retries_left: 42,
         status: TransferStatus::Proving,
         tx_hash: None,
         failure_reason: None,
-        // account:Data::new(account),
         relayer_url,
         params,
         db,
@@ -203,14 +193,11 @@ pub async fn transaction_status<D: KeyValueDB>(
             CustodyDbColumn::JobsIndex.into(),
             &request.0.request_id.into_bytes(),
         )
-        .map_err(|e| CustodyServiceError::DataBaseReadError)?
+        .map_err(|_| CustodyServiceError::DataBaseReadError)?
         .ok_or(CustodyServiceError::TransactionNotFound)?;
 
     let job: JobShortInfo =
         serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
-
-    // let relayer_endpoint = custody.relayer_endpoint(request.0.request_id)?;
-    // let transaction_status = fetch_tx_status(&relayer_endpoint).await?;
 
     Ok(HttpResponse::Ok().json(job))
 }

@@ -27,7 +27,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{info_span, Instrument};
 use uuid::Uuid;
 
 use super::{
@@ -56,7 +55,6 @@ impl Into<u32> for CustodyDbColumn {
 pub struct CustodyService {
     pub settings: CustodyServiceSettings,
     pub accounts: Vec<Account>,
-    // pub params: Parameters<Bn256>,
     pub db: Data<kvdb_rocksdb::Database>,
 }
 
@@ -73,7 +71,11 @@ pub enum TransferStatus {
 impl From<String> for TransferStatus {
     fn from(val: String) -> Self {
         match val.as_str() {
-            "complete" => Self::Done,
+            "waiting" => Self::Relaying,
+            "sent" => Self::Mining,
+            "reverted" => Self::Failed(CustodyServiceError::RelayerSendError), // TODO: fix error
+            "completed" => Self::Done,
+            "failed" => Self::Failed(CustodyServiceError::RelayerSendError),
             _ => Self::Failed(CustodyServiceError::RelayerSendError),
         }
     }
@@ -462,30 +464,12 @@ impl CustodyService {
             .ok_or(CustodyServiceError::AccountNotFound)
     }
 
-    // pub fn move_account(&self, account_id: Uuid) -> Result<Account, CustodyServiceError> {
-    //     self.accounts
-    //         .into_iter()
-    //         .find(|account| account.id == account_id)
-    //         .ok_or(CustodyServiceError::AccountNotFound)
-    // }
-
-    pub fn get_job_id_by_request_id(
-        &self,
-        request_id: &str,
-    ) -> Result<Option<String>, CustodyServiceError> {
-        self.db
-            .get(CustodyDbColumn::JobsIndex.into(), request_id.as_bytes())
+    pub fn has_request_id(&self, request_id: &str) -> Result<bool, CustodyServiceError> {
+        self.db.has_key(CustodyDbColumn::JobsIndex.into(), request_id.as_bytes())
             .map_err(|err| {
                 tracing::error!("failed to get job id from database: {}", err);
                 CustodyServiceError::DataBaseReadError
-            })?
-            .map(|id| {
-                String::from_utf8(id).map_err(|err| {
-                    tracing::error!("failed to parse job id from database: {}", err);
-                    CustodyServiceError::DataBaseReadError
-                })
             })
-            .map_or(Ok(None), |v| v.map(Some))
     }
 
     pub fn get_request_id(&self, nullifier: Vec<u8>) -> Result<String, String> {
@@ -502,22 +486,6 @@ impl CustodyService {
 }
 
 impl ScheduledTask {
-    // pub fn new(request_id: String, account_id: String, db: Data<Database>, relayer_url: String, params: Data<Parameters<Bn256>> ) -> Self {
-    //     Self {
-    //         request_id,
-    //         account_id ,
-    //         db,
-    //         job_id: None,
-    //         endpoint: None,
-    //         relayer_url,
-    //         retries_left: 42,
-    //         status : TransferStatus::Newew,
-    //         tx_hash: None,
-    //         failure_reason: None,
-    //         params,
-    //         tx: todo!(),
-    //     }
-    // }
     pub async fn fetch_status_with_retries(&mut self) -> Result<(), CustodyServiceError> {
         tracing::info!(
             "fetchin status for task {}, retries left {}",

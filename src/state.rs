@@ -17,7 +17,6 @@ use libzeropool::{
 };
 use libzkbob_rs::merkle::MerkleTree;
 use memo_parser::memoparser;
-use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 use tracing_futures::Instrument;
 use uuid::Uuid;
