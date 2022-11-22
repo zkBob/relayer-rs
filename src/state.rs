@@ -87,7 +87,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                     .into_iter()
                     .map(|i| i)
                     .collect();
-                tracing::info!("mising indices: {:?}", missing_indices);
+                tracing::debug!("mising indices: {:?}", missing_indices);
 
                 let from_block = {
                     self.jobs

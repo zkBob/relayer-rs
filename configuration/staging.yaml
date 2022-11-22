@@ -11,6 +11,6 @@ web3:
   pool_address: 3bd088C19960A8B5d72E4e01847791BD0DD1C9E6
   start_block: 1793710
 custody:
-  db_path: ./custody_db
+  db_path: ./data/custody_db
   relayer_url: https://relayer.thgkjlr.website
   sync_interval_sec: 30

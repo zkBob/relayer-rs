@@ -7,6 +7,7 @@ services:
     volumes: 
       - ../params:/app/params/
       - ../configuration/staging.yaml:/app/configuration/staging.yaml
+      - ../data:/app/data
     environment:
       APP_ENVIRONMENT: 'staging'
       RUST_LOG: "info"

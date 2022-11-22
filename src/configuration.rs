@@ -17,6 +17,7 @@ pub struct ApplicationSettings {
     pub telemetry: TelemetrySettings,
     pub tx: Tx,
     pub tree: Tree,
+    pub db_path: String
     
 }
 #[derive(Debug,Deserialize, Serialize, Clone)]

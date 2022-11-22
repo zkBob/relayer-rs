@@ -9,3 +9,4 @@ data/params
 accounts_data
 params
 docker/relayer-rs
+data
