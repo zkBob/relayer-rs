@@ -2,7 +2,7 @@ name: Docker Image CI
 
 on:
   push:
-    branches: [ "custody" ]
+    branches: [ "custody", "custody_sync_performance_issues" ]
   pull_request:
     branches: [ "main" ]
 
