@@ -13,4 +13,5 @@ web3:
 custody:
   db_path: ./data/custody_db
   relayer_url: https://relayer.thgkjlr.website
-  sync_interval_sec: 30
+  sync_interval_sec: 15
+  admin_token: 12345

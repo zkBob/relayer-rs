@@ -2,6 +2,7 @@ use actix_web::{
     web::{Data, Json, Query},
     HttpResponse,
 };
+use actix_web_httpauth::extractors::bearer::BearerAuth;
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
 use libzeropool::fawkes_crypto::{
@@ -54,13 +55,11 @@ pub async fn account_info<D: KeyValueDB>(
 
 pub async fn signup<D: KeyValueDB>(
     request: Json<SignupRequest>,
-    _state: Data<State<D>>,
     custody: Data<RwLock<CustodyService>>,
-    _params: Data<Parameters<Bn256>>,
-    _custody_db: Data<Database>,
-    _prover_sender: Data<Sender<ScheduledTask>>,
+    bearer: BearerAuth,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let mut custody = custody.write().await;
+    custody.validate_token(bearer.token())?;
 
     let account_id = custody.new_account(request.0.description);
 
@@ -70,10 +69,12 @@ pub async fn signup<D: KeyValueDB>(
 }
 
 pub async fn list_accounts<D: KeyValueDB>(
-    _state: Data<State<D>>,
     custody: Custody,
+    bearer: BearerAuth,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
+    custody.validate_token(bearer.token())?;
+
     Ok(HttpResponse::Ok().json(custody.list_accounts().await))
 }
 

@@ -167,6 +167,13 @@ impl CustodyService {
         .unwrap()
     }
 
+    pub fn validate_token(&self, bearer_token: &str) -> Result<(), CustodyServiceError> {
+        if self.settings.admin_token != bearer_token {
+            return Err(CustodyServiceError::AccessDenied)
+        }
+        Ok(())
+    }
+
     pub fn new<D: KeyValueDB>(
         settings: CustodyServiceSettings,
         state: Data<State<D>>,
