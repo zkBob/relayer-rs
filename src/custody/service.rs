@@ -125,16 +125,18 @@ pub async fn callback_with_retries(
     mut job_status_callback: JobStatusCallback,
     retry_queue: Sender<JobStatusCallback>,
 ) {
-    
-    tracing::debug!("trying to deliver callback for request {}", &job_status_callback.request_id);
+    tracing::debug!(
+        "trying to deliver callback for request {}",
+        &job_status_callback.request_id
+    );
 
     let client = reqwest::Client::new();
 
-    let body = serde_json::to_vec(&job_status_callback.job_status_info).unwrap();
+    let body = serde_json::to_value(&job_status_callback.job_status_info).unwrap();
 
     let resp = client
         .post(&job_status_callback.endpoint)
-        .body(body)
+        .json(&body)
         .send()
         .await;
 
@@ -161,7 +163,10 @@ pub async fn callback_with_retries(
             retry_queue.send(job_status_callback).await.unwrap();
         });
     } else {
-    tracing::debug!("retries exhausted for callback {} ", job_status_callback.request_id);
+        tracing::debug!(
+            "retries exhausted for callback {} ",
+            job_status_callback.request_id
+        );
     }
 }
 
@@ -257,8 +262,7 @@ impl CustodyService {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             loop {
-                tracing::debug!("Sync custody state...");
-                rt.block_on(state.sync()).unwrap();
+                rt.block_on(state.sync().instrument(tracing::debug_span!("Sync custody state..."))).unwrap();
                 thread::sleep(sync_interval);
             }
         });
@@ -621,16 +625,21 @@ impl ScheduledTask {
     }
 
     pub async fn make_proof_and_send_to_relayer(&mut self) -> Result<(), CustodyServiceError> {
+        let request_id = self.request_id.clone();
         {
             let tx = self.tx.clone();
             // let account_id = Uuid::from_str(&request.account_id).unwrap();
 
-            let (inputs, proof) = prove_tx(
-                &self.params,
-                &*libzeropool::POOL_PARAMS,
-                tx.public,
-                tx.secret,
-            );
+            let proving_span = tracing::info_span!("proving", request_id = request_id.clone());
+        
+            let (inputs, proof) = proving_span.in_scope(|| {
+                prove_tx(
+                    &self.params,
+                    &*libzeropool::POOL_PARAMS,
+                    tx.public,
+                    tx.secret,
+                )
+            });
 
             let proof = Proof { inputs, proof };
 
@@ -649,6 +658,10 @@ impl ScheduledTask {
                 .json(&tx_request)
                 .header("Content-type", "application/json")
                 .send()
+                .instrument(tracing::info_span!(
+                    "sending to relayer",
+                    request_id = request_id.clone()
+                ))
                 .await
                 .map_err(|e| {
                     tracing::error!(
@@ -685,6 +698,10 @@ impl ScheduledTask {
         }
 
         self.update_status(TransferStatus::Relaying)
+            .instrument(tracing::info_span!(
+                "updating status, new status: Relaying",
+                request_id = request_id
+            ))
             .await
             .map_err(|err| {
                 tracing::error!("failed to save job_id: {}", err);
@@ -712,6 +729,7 @@ impl ScheduledTask {
         &mut self,
         status: TransferStatus,
     ) -> Result<(), CustodyServiceError> {
+        tracing::info!("update status initiated");
         let job_status_info = JobShortInfo {
             // job_id: self.job_id.clone(),
             status: status.clone(),
@@ -733,6 +751,7 @@ impl ScheduledTask {
             .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))?;
 
         if let Some(endpoint) = self.callback_address.clone() {
+            tracing::info!("trying to deliver callback");
             let job_status_callback = JobStatusCallback {
                 request_id: self.request_id.clone(),
                 endpoint,
@@ -744,8 +763,10 @@ impl ScheduledTask {
                     .as_secs(),
             };
 
-            self.callback_sender.send(job_status_callback).await.unwrap();
-            
+            self.callback_sender
+                .send(job_status_callback)
+                .await
+                .unwrap();
         }
 
         Ok(())

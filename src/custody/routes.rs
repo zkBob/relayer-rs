@@ -13,15 +13,11 @@ use std::str::FromStr;
 use tokio::sync::{mpsc::Sender, RwLock};
 use uuid::Uuid;
 
-use crate::{
-    custody::types::TransferResponse,
-    routes::job::JobResponse,
-    state::{State},
-};
+use crate::{custody::types::TransferResponse, routes::job::JobResponse, state::State};
 
 use super::{
     errors::CustodyServiceError,
-    service::{CustodyDbColumn, CustodyService, JobShortInfo, TransferStatus, JobStatusCallback},
+    service::{CustodyDbColumn, CustodyService, JobShortInfo, JobStatusCallback, TransferStatus},
     types::{
         AccountInfoRequest, Fr, GenerateAddressResponse, ScheduledTask, SignupRequest,
         SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest,
@@ -143,7 +139,7 @@ pub async fn transfer<D: KeyValueDB>(
     let db = custody_db.clone();
 
     ScheduledTask::save_new(custody_db, request_id.clone())?;
-    
+
     tracing::info!(
         "{} request received & saved, tx created and sent to the prover queue",
         &request_id
@@ -164,7 +160,7 @@ pub async fn transfer<D: KeyValueDB>(
         db,
         tx,
         callback_address: request.webhook, // custody,
-        callback_sender
+        callback_sender,
     };
 
     prover_sender.send(task).await.unwrap();
@@ -202,6 +198,15 @@ pub async fn fetch_tx_status(
             Err(CustodyServiceError::RelayerSendError)
         }
     }
+}
+
+pub async fn mock_callback(
+    request: Json<JobShortInfo>,
+) -> Result<HttpResponse, CustodyServiceError> {
+    tracing::info!(
+        "received callback {:#?}", request
+    );
+    Ok(HttpResponse::Ok().finish())
 }
 pub async fn transaction_status<D: KeyValueDB>(
     request: Query<TransferStatusRequest>,
