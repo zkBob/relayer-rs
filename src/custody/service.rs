@@ -141,6 +141,7 @@ pub fn start_status_updater(
         }
     });
 }
+
 impl CustodyService {
     pub fn relayer_endpoint(&self, request_id: String) -> Result<String, CustodyServiceError> {
         let job_id = self
@@ -167,7 +168,6 @@ impl CustodyService {
     }
 
     pub fn new<D: KeyValueDB>(
-        // params: Parameters<Bn256>,
         settings: CustodyServiceSettings,
         state: Data<State<D>>,
         db: Data<Database>,
@@ -204,7 +204,6 @@ impl CustodyService {
         Self {
             accounts,
             settings,
-            // params,
             db,
         }
     }
@@ -264,44 +263,6 @@ impl CustodyService {
             .unwrap(),
         }
     }
-
-    // pub fn transfer(
-    //     &self,
-    //     request: TransferRequest,
-    // ) -> Result<TransactionRequest, CustodyServiceError> {
-    //     let account_id = Uuid::from_str(&request.account_id).unwrap();
-    //     let account = self.account(account_id)?;
-    //     let account = account.inner.read().unwrap();
-
-    //     let fee = 100000000;
-    //     let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
-
-    //     let tx_output: TxOutput<Fr> = TxOutput {
-    //         to: request.to,
-    //         amount: TokenAmount::new(Num::from_uint(NumRepr::from(request.amount)).unwrap()),
-    //     };
-    //     let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], vec![tx_output]);
-
-    //     let tx = account.create_tx(transfer, None, None).unwrap();
-    //     let (inputs, proof) = prove_tx(
-    //         &self.params,
-    //         &*libzeropool::POOL_PARAMS,
-    //         tx.public,
-    //         tx.secret,
-    //     );
-
-    //     let proof = Proof { inputs, proof };
-
-    //     let tx_request = TransactionRequest {
-    //         uuid: Some(Uuid::new_v4().to_string()),
-    //         proof,
-    //         memo: hex::encode(tx.memo),
-    //         tx_type: format!("{:0>4}", MemoTxType::Transfer.to_u32()),
-    //         deposit_signature: None,
-    //     };
-
-    //     Ok(tx_request)
-    // }
 
     pub async fn deposit(
         &self,
@@ -557,17 +518,29 @@ impl ScheduledTask {
             }
         }
     }
+
     pub fn save_nullifier(&self, nullifier: Vec<u8>) -> Result<(), String> {
-        let tx = {
-            let mut tx = self.db.transaction();
-            tx.put(
-                CustodyDbColumn::NullifierIndex.into(),
-                &nullifier,
-                self.request_id.as_bytes(),
-            );
-            tx
-        };
-        self.db.write(tx).map_err(|err| err.to_string())
+        let nullifier_exists = self.db.has_key(
+            CustodyDbColumn::NullifierIndex.into(), 
+            &nullifier
+        ).unwrap();
+
+        if !nullifier_exists {
+            let tx = {
+                let mut tx = self.db.transaction();
+                tx.put(
+                    CustodyDbColumn::NullifierIndex.into(),
+                    &nullifier,
+                    self.request_id.as_bytes(),
+                );
+                tx
+            };
+            self.db.write(tx).map_err(|err| err.to_string())
+        } else {
+            // TODO: what to do in this case?
+            // we shouldn't overwrite existed value
+            Ok(())
+        }
     }
 
     pub async fn make_proof_and_send_to_relayer(&mut self) -> Result<(), CustodyServiceError> {
@@ -668,7 +641,6 @@ impl ScheduledTask {
                 CustodyDbColumn::JobsIndex.into(),
                 self.request_id.as_bytes(),
                 &serde_json::to_vec(&JobShortInfo {
-                    // job_id: self.job_id.clone(),
                     status: status.clone(),
                     tx_hash: self.tx_hash.clone(),
                     failure_reason: self.failure_reason.clone(),
