@@ -5,7 +5,7 @@ use relayer_rs::{
 };
 use web3::types::BlockNumber;
 
-use crate::helpers::spawn_app;
+use crate::api::helpers::spawn_app;
 
 #[tokio::test]
 async fn test_sync() {

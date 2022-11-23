@@ -1,12 +1,17 @@
 use relayer_rs::{
     configuration::get_config,
     contracts::Pool,
+    custody::{
+        account::{data_file_path, DataType},
+        service::CustodyService,
+    },
     startup::Application,
-    tx_checker, tx_sender, types::job::Job,
     telemetry::setup_telemetry,
+    tx_checker, tx_sender,
+    types::job::Job,
 };
-use tracing::Instrument;
 use std::sync::Mutex;
+use tracing::Instrument;
 
 use libzeropool::POOL_PARAMS;
 use libzkbob_rs::merkle::MerkleTree;
@@ -45,6 +50,26 @@ async fn main() -> Result<(), std::io::Error> {
     let pool = Pool::new(&Data::new(configuration.web3.clone()))
         .expect("failed to instantiate pool contract");
 
+    // let custody:Data<RwLock<CustodyService<D>>> = Data::new(RwLock::new(CustodyService::new(
+    //     // tx_params,
+    //     configuration.custody,
+    //     custody_db.clone(),
+    // )));
+
+    let custody_db = Data::new(kvdb_rocksdb::Database::open(
+        &DatabaseConfig {
+            columns: 1, //TBD
+            ..Default::default()
+        },
+        "custody_db/custody",
+    )
+    .unwrap());
+
+    let custody = CustodyService::<Database>::new_native(
+        configuration.custody.clone(),
+        custody_db.clone(),
+    );
+
     let app = Application::build(
         configuration,
         sender.clone(),
@@ -52,22 +77,23 @@ async fn main() -> Result<(), std::io::Error> {
         finalized.clone(),
         jobs.clone(),
         None,
+        custody,
+        custody_db,
     )
     .await?;
 
     tx_sender::start(&app.state, receiver, tree_params, pool);
     tx_checker::start(&app.state);
 
-    
     app.state
-    .sync()
-    .instrument(tracing::debug_span!("state sync"))
-    .await
-    .map_err(|e| {
-        tracing::error!("sync failed:\n\t{:#?}", e);
-        e
-    })
-    .unwrap();
+        .sync()
+        .instrument(tracing::debug_span!("state sync"))
+        .await
+        .map_err(|e| {
+            tracing::error!("sync failed:\n\t{:#?}", e);
+            e
+        })
+        .unwrap();
 
     app.run_untill_stopped().await
 }

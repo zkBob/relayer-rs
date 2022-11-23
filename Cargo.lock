@@ -270,6 +270,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ansi_term"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d52a9bb7ec0cf484c551830a7ce27bd20d67eac647e1befb56b0be4ee39a55d2"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -655,9 +664,27 @@ dependencies = [
  "clap_lex",
  "indexmap",
  "once_cell",
- "strsim",
+ "strsim 0.10.0",
  "termcolor",
- "textwrap",
+ "textwrap 0.16.0",
+]
+
+[[package]]
+name = "clap-v3"
+version = "3.0.0-beta.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfac055d61c39ace5061621530f7f55651a261a4fba296ce1bad06d41a8de65e"
+dependencies = [
+ "ansi_term",
+ "atty",
+ "bitflags",
+ "clap_derive-v3",
+ "indexmap",
+ "lazy_static",
+ "strsim 0.9.3",
+ "textwrap 0.11.0",
+ "unicode-width",
+ "vec_map",
 ]
 
 [[package]]
@@ -666,8 +693,21 @@ version = "3.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea0c8bce528c4be4da13ea6fead8965e95b6073585a2f05204bd8f4119f82a65"
 dependencies = [
- "heck",
- "proc-macro-error",
+ "heck 0.4.0",
+ "proc-macro-error 1.0.4",
+ "proc-macro2 1.0.47",
+ "quote 1.0.21",
+ "syn 1.0.103",
+]
+
+[[package]]
+name = "clap_derive-v3"
+version = "3.0.0-beta.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6dd675567eb3e35787bd2583d129e85fabc7503b0a093d08c51198a307e2091"
+dependencies = [
+ "heck 0.3.3",
+ "proc-macro-error 0.4.12",
  "proc-macro2 1.0.47",
  "quote 1.0.21",
  "syn 1.0.103",
@@ -1083,7 +1123,7 @@ dependencies = [
 [[package]]
 name = "fawkes-crypto"
 version = "4.3.3"
-source = "git+https://github.com/zkBob/fawkes-crypto?branch=multicore-wasm-https#82d1ba47077e572c0f0ae64336c4725493abcc1a"
+source = "git+ssh://git@github.com/zkBob/fawkes-crypto.git?branch=multicore-wasm#2abec646403766938d0f6c169ce7b3f04a92669d"
 dependencies = [
  "bit-vec",
  "blake2-rfc_bellman_edition",
@@ -1104,7 +1144,7 @@ dependencies = [
 [[package]]
 name = "fawkes-crypto-bellman_ce"
 version = "0.3.5"
-source = "git+https://github.com/zkBob/phase2-bn254?branch=multicore-wasm#f484dbe81e1fd5707de4168a928c5a51e0389add"
+source = "git+ssh://git@github.com/zkBob/phase2-bn254.git?branch=multicore-wasm#f484dbe81e1fd5707de4168a928c5a51e0389add"
 dependencies = [
  "bit-vec",
  "byteorder",
@@ -1116,7 +1156,7 @@ dependencies = [
 [[package]]
 name = "fawkes-crypto-pairing_ce"
 version = "0.18.1"
-source = "git+https://github.com/zkBob/phase2-bn254?branch=multicore-wasm#f484dbe81e1fd5707de4168a928c5a51e0389add"
+source = "git+ssh://git@github.com/zkBob/phase2-bn254.git?branch=multicore-wasm#f484dbe81e1fd5707de4168a928c5a51e0389add"
 dependencies = [
  "byteorder",
  "ff_ce",
@@ -1126,7 +1166,7 @@ dependencies = [
 [[package]]
 name = "fawkes-crypto_derive"
 version = "4.3.0"
-source = "git+https://github.com/zkBob/fawkes-crypto?branch=multicore-wasm-https#82d1ba47077e572c0f0ae64336c4725493abcc1a"
+source = "git+ssh://git@github.com/zkBob/fawkes-crypto.git?branch=multicore-wasm#2abec646403766938d0f6c169ce7b3f04a92669d"
 dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.21",
@@ -1136,7 +1176,7 @@ dependencies = [
 [[package]]
 name = "ff-uint"
 version = "0.2.4"
-source = "git+https://github.com/zkBob/fawkes-crypto?branch=multicore-wasm-https#82d1ba47077e572c0f0ae64336c4725493abcc1a"
+source = "git+ssh://git@github.com/zkBob/fawkes-crypto.git?branch=multicore-wasm#2abec646403766938d0f6c169ce7b3f04a92669d"
 dependencies = [
  "borsh",
  "byteorder",
@@ -1155,7 +1195,7 @@ dependencies = [
 [[package]]
 name = "ff-uint_derive"
 version = "0.2.4"
-source = "git+https://github.com/zkBob/fawkes-crypto?branch=multicore-wasm-https#82d1ba47077e572c0f0ae64336c4725493abcc1a"
+source = "git+ssh://git@github.com/zkBob/fawkes-crypto.git?branch=multicore-wasm#2abec646403766938d0f6c169ce7b3f04a92669d"
 dependencies = [
  "num-bigint 0.3.3",
  "num-integer",
@@ -1489,6 +1529,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7f66481bfee273957b1f20485a4ff3362987f85b2c236580d81b4eb7a326429"
 dependencies = [
  "http",
+]
+
+[[package]]
+name = "heck"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d621efb26863f0e9924c6ac577e8275e5e6b77455db64ffa6c65c904e9e132c"
+dependencies = [
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -1946,9 +1995,10 @@ dependencies = [
 [[package]]
 name = "libzeropool"
 version = "0.5.6"
-source = "git+https://github.com/zkBob/libzeropool?branch=multicore-wasm-https#30e6d44f9e733ace22e8b26a8b75881112afe6e9"
+source = "git+https://github.com/zkBob/libzeropool?branch=sample_state_generator#135bae4760efd9c312bb9d9f4073e0207e21017c"
 dependencies = [
  "chacha20poly1305",
+ "clap-v3",
  "convert_case",
  "fawkes-crypto",
  "lazy_static",
@@ -1959,8 +2009,8 @@ dependencies = [
 
 [[package]]
 name = "libzkbob-rs"
-version = "0.8.0"
-source = "git+https://github.com/zkBob/libzkbob-rs?branch=custody#1ea23b7b3f6857578a9524aadf074cd783486683"
+version = "0.7.0"
+source = "git+https://github.com/zkBob/libzkbob-rs?branch=sample_state_generator#f2076da959a2c1eca2bbf71b0fc95dab36095536"
 dependencies = [
  "base64",
  "borsh",
@@ -2649,14 +2699,40 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-error"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18f33027081eba0a6d8aba6d1b1c3a3be58cbb12106341c2d5759fcd9b5277e7"
+dependencies = [
+ "proc-macro-error-attr 0.4.12",
+ "proc-macro2 1.0.47",
+ "quote 1.0.21",
+ "syn 1.0.103",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro-error"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
 dependencies = [
- "proc-macro-error-attr",
+ "proc-macro-error-attr 1.0.4",
  "proc-macro2 1.0.47",
  "quote 1.0.21",
  "syn 1.0.103",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a5b4b77fdb63c1eca72173d68d24501c54ab1269409f6b672c85deb18af69de"
+dependencies = [
+ "proc-macro2 1.0.47",
+ "quote 1.0.21",
+ "syn 1.0.103",
+ "syn-mid",
  "version_check",
 ]
 
@@ -3177,7 +3253,7 @@ dependencies = [
 [[package]]
 name = "seedbox"
 version = "0.2.0"
-source = "git+https://github.com/zkBob/fawkes-crypto?branch=multicore-wasm-https#82d1ba47077e572c0f0ae64336c4725493abcc1a"
+source = "git+ssh://git@github.com/zkBob/fawkes-crypto.git?branch=multicore-wasm#2abec646403766938d0f6c169ce7b3f04a92669d"
 dependencies = [
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
@@ -3414,6 +3490,12 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "strsim"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6446ced80d6c486436db5c078dde11a9f73d42b57fb273121e160b84f63d894c"
+
+[[package]]
+name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
@@ -3444,6 +3526,17 @@ dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.21",
  "unicode-ident",
+]
+
+[[package]]
+name = "syn-mid"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baa8e7560a164edb1621a55d18a0c59abf49d360f47aa7b821061dd7eea7fac9"
+dependencies = [
+ "proc-macro2 1.0.47",
+ "quote 1.0.21",
+ "syn 1.0.103",
 ]
 
 [[package]]
@@ -3498,6 +3591,15 @@ dependencies = [
  "quote 1.0.21",
  "syn 1.0.103",
  "version_check",
+]
+
+[[package]]
+name = "textwrap"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d326610f408c7a4eb6f51c37c330e496b08506c9457c9d34287ecc38809fb060"
+dependencies = [
+ "unicode-width",
 ]
 
 [[package]]
@@ -3895,6 +3997,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unicode-segmentation"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fdbf052a0783de01e944a6ce7a8cb939e295b1e7be835a1112c3b9a7f047a5a"
+
+[[package]]
 name = "unicode-width"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3961,6 +4069,12 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "vec_map"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "version_check"

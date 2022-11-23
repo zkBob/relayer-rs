@@ -2,7 +2,7 @@ use crate::{
     custody::{
         routes::fetch_tx_status,
         tx_parser::ParseResult,
-        types::{HistoryDbColumn, HistoryRecord},
+        types::{HistoryDbColumn, HistoryRecord}, account::DataType,
     },
     helpers::BytesRepr,
     state::State,
@@ -13,13 +13,14 @@ use crate::{
 };
 use actix_web::web::Data;
 use kvdb::KeyValueDB;
+use kvdb_memorydb::InMemory;
 use kvdb_rocksdb::{Database, DatabaseConfig};
-use libzeropool::fawkes_crypto::ff_uint::NumRepr;
 use libzeropool::{
     circuit::tx::c_transfer,
-    fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters},
-    fawkes_crypto::{backend::bellman_groth16::prover::prove, ff_uint::Num},
+    fawkes_crypto::{backend::bellman_groth16::{engines::Bn256, Parameters}, rand::Rng},
+    fawkes_crypto::{backend::bellman_groth16::prover::prove, ff_uint::Num}, POOL_PARAMS,
 };
+use libzeropool::{fawkes_crypto::ff_uint::NumRepr, native::params::PoolBN256};
 use memo_parser::memo::TxType as MemoTxType;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -27,7 +28,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
     u64,
 };
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::{mpsc::{Receiver, Sender}, RwLock};
 use tracing::{info_span, Instrument};
 use uuid::Uuid;
 
@@ -39,8 +40,10 @@ use super::{
     types::{AccountShortInfo, Fr, RelayerState, ScheduledTask, TransactionStatusResponse},
 };
 use libzkbob_rs::{
-    client::{TokenAmount, TxType},
+    client::{state::{Transaction, State as ClientState}, UserAccount as NativeUserAccount,TokenAmount, TxType},
+    merkle::MerkleTree,
     proof::prove_tx,
+    sparse_array::SparseArray, random::CustomRng,
 };
 
 pub enum CustodyDbColumn {
@@ -54,11 +57,23 @@ impl Into<u32> for CustodyDbColumn {
     }
 }
 
-pub struct CustodyService {
+pub struct CustodyService<D: KeyValueDB> {
     pub settings: CustodyServiceSettings,
-    pub accounts: Vec<Account>,
+    pub accounts: Vec<Account<D>>,
     // pub params: Parameters<Bn256>,
-    pub db: Data<kvdb_rocksdb::Database>,
+    pub db: Data<D>,
+}
+
+impl CustodyService<InMemory> {
+    pub fn new_test(db: Data<InMemory>, settings: CustodyServiceSettings) -> Self {
+
+        Self {
+            settings,
+            accounts : vec![],
+            db
+        }
+
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -125,8 +140,10 @@ pub async fn callback_with_retries(
     mut job_status_callback: JobStatusCallback,
     retry_queue: Sender<JobStatusCallback>,
 ) {
-    
-    tracing::debug!("trying to deliver callback for request {}", &job_status_callback.request_id);
+    tracing::debug!(
+        "trying to deliver callback for request {}",
+        &job_status_callback.request_id
+    );
 
     let client = reqwest::Client::new();
 
@@ -161,13 +178,16 @@ pub async fn callback_with_retries(
             retry_queue.send(job_status_callback).await.unwrap();
         });
     } else {
-    tracing::debug!("retries exhausted for callback {} ", job_status_callback.request_id);
+        tracing::debug!(
+            "retries exhausted for callback {} ",
+            job_status_callback.request_id
+        );
     }
 }
 
-pub fn start_prover(
-    mut prover_receiver: Receiver<ScheduledTask>,
-    status_sender: Sender<ScheduledTask>,
+pub fn start_prover<D:KeyValueDB + 'static>(
+    mut prover_receiver: Receiver<ScheduledTask<D>>,
+    status_sender: Sender<ScheduledTask<D>>,
 ) {
     tokio::task::spawn(async move {
         while let Some(mut task) = prover_receiver.recv().await {
@@ -184,9 +204,9 @@ pub fn start_prover(
     });
 }
 
-pub fn start_status_updater(
-    mut status_updater_receiver: Receiver<ScheduledTask>,
-    status_updater_sender: Sender<ScheduledTask>,
+pub fn start_status_updater<D:KeyValueDB + 'static>(
+    mut status_updater_receiver: Receiver<ScheduledTask<D>>,
+    status_updater_sender: Sender<ScheduledTask<D>>,
 ) {
     tokio::task::spawn(async move {
         while let Some(mut task) = status_updater_receiver.recv().await {
@@ -203,7 +223,220 @@ pub fn start_status_updater(
         }
     });
 }
-impl CustodyService {
+struct AccountStorage<D: KeyValueDB> {
+    account: D,
+    history: D,
+    tree: MerkleTree<D, PoolBN256>,
+    txs: SparseArray<D, Transaction<Fr>>,
+}
+impl CustodyService<Database> {
+    pub fn get_native_account_storage(base_path: String) {
+        let base_path = format!("{}/accounts_data", base_path);
+        // let mut accounts = vec![];
+
+        let paths = fs::read_dir(&base_path);
+        if let Ok(paths) = paths {
+            tracing::info!("Loading accounts...");
+            for path in paths {
+                if let Ok(path) = path {
+                    if path.file_type().unwrap().is_dir() {
+                        let account_id = path.file_name();
+                        let account_id = account_id.to_str().unwrap();
+                        tracing::info!("Loading: {}", account_id);
+                        let account = Account::load_native(&base_path, account_id).unwrap();
+                        // accounts.push(account);
+                    }
+                }
+            }
+        };
+    }
+}
+
+trait AccountManagement {
+    fn create_account(&mut self, description: String) -> Uuid;
+}
+
+pub fn data_file_path(base_path: &str, account_id: Uuid, data_type: DataType) -> String {
+    format!("{}/{}/{}", base_path, account_id.as_hyphenated(), data_type)
+}
+impl AccountManagement for CustodyService<Database> {
+    fn create_account(&mut self, description: String) -> Uuid {
+        fn native_account(description: String, base_path: &str) -> Account<Database> {
+            let id = uuid::Uuid::new_v4();
+            let state = ClientState::new(
+                MerkleTree::new_native(
+                    Default::default(),
+                    &data_file_path(base_path, id, DataType::Tree),
+                    POOL_PARAMS.clone(),
+                )
+                .unwrap(),
+                SparseArray::new_native(
+                    &Default::default(),
+                    &data_file_path(base_path, id, DataType::Transactions),
+                )
+                .unwrap(),
+            );
+
+            let mut rng = CustomRng;
+            let sk: [u8; 32] = rng.gen();
+
+            let account_db = kvdb_rocksdb::Database::open(
+                &DatabaseConfig {
+                    columns: 1,
+                    ..Default::default()
+                },
+                &data_file_path(base_path, id, DataType::AccountData),
+            )
+            .unwrap();
+
+            account_db
+                .write({
+                    let mut tx = account_db.transaction();
+                    tx.put(0, "sk".as_bytes(), &sk);
+                    tx.put(0, "description".as_bytes(), description.as_bytes());
+                    tx
+                })
+                .unwrap();
+
+            let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
+            Account {
+                inner: RwLock::new(user_account),
+                id,
+                description,
+                history: kvdb_rocksdb::Database::open(
+                    &DatabaseConfig {
+                        columns: 1,
+                        ..Default::default()
+                    },
+                    &data_file_path(base_path, id, DataType::History),
+                )
+                .unwrap(),
+            }
+        }
+
+        let base_path = format!("{}/accounts_data", self.settings.db_path);
+        let account = Account::new_native(description, &base_path);
+        let id = account.id;
+        self.accounts.push(account);
+        tracing::info!("created a new account: {}", id);
+        id
+    }
+}
+impl<D: KeyValueDB> CustodyService<D> {
+    pub fn start_sync(&self, state: Data<State<D>>) {
+        let sync_interval = Duration::from_secs(self.settings.sync_interval_sec);
+
+        thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            loop {
+                tracing::debug!("Sync custody state...");
+                rt.block_on(state.sync()).unwrap();
+                thread::sleep(sync_interval);
+            }
+        });
+    }
+    // pub fn new (
+    //     settings: CustodyServiceSettings,
+    //     state: Data<State<D>>,
+    //     db: Data<D>,
+    // //     account_db: D,
+    // // history_db: D,
+    // // tree: MerkleTree<D, PoolBN256>,
+    // // txs: SparseArray<D, Transaction<Fr>>,
+    // ) {
+    //     let base_path = format!("{}/accounts_data", &settings.db_path);
+    //     let mut accounts = vec![];
+
+    //     let paths = fs::read_dir(&base_path);
+    //     if let Ok(paths) = paths {
+    //         tracing::info!("Loading accounts...");
+    //         for path in paths {
+    //             if let Ok(path) = path {
+    //                 if path.file_type().unwrap().is_dir() {
+    //                     let account_id = path.file_name();
+    //                     let account_id = account_id.to_str().unwrap();
+    //                     tracing::info!("Loading: {}", account_id);
+    //                     let account = Account::load(&base_path, account_id).unwrap();
+    //                     accounts.push(account);
+    //                 }
+    //             }
+    //         }
+    //     }
+
+    //     let sync_interval = Duration::from_secs(settings.sync_interval_sec);
+    //     thread::spawn(move || {
+    //         let rt = tokio::runtime::Runtime::new().unwrap();
+    //         loop {
+    //             tracing::debug!("Sync custody state...");
+    //             rt.block_on(state.sync()).unwrap();
+    //             thread::sleep(sync_interval);
+    //         }
+    //     });
+
+    //     Self {
+    //         accounts,
+    //         settings,
+    //         // params,
+    //         db,
+    //     }
+    // }
+}
+impl CustodyService<Database> {
+    pub fn new_native(
+        // params: Parameters<Bn256>,
+        settings: CustodyServiceSettings,
+        db: Data<Database>,
+    ) -> Self {
+        let base_path = format!("{}/accounts_data", &settings.db_path);
+        let mut accounts = vec![];
+
+        let paths = fs::read_dir(&base_path);
+        if let Ok(paths) = paths {
+            tracing::info!("Loading accounts...");
+            for path in paths {
+                if let Ok(path) = path {
+                    if path.file_type().unwrap().is_dir() {
+                        let account_id = path.file_name();
+                        let account_id = account_id.to_str().unwrap();
+                        tracing::info!("Loading: {}", account_id);
+                        let account = Account::load_native(&base_path, account_id).unwrap();
+                        accounts.push(account);
+                    }
+                }
+            }
+        }
+
+        // let sync_interval = Duration::from_secs(settings.sync_interval_sec);
+        // thread::spawn(move || {
+        //     let rt = tokio::runtime::Runtime::new().unwrap();
+        //     loop {
+        //         tracing::debug!("Sync custody state...");
+        //         rt.block_on(state.sync()).unwrap();
+        //         thread::sleep(sync_interval);
+        //     }
+        // });
+
+        Self {
+            accounts,
+            settings,
+            // params,
+            db,
+        }
+    }
+
+    pub fn new_native_account(&mut self, description: String) -> Uuid {
+        let base_path = format!("{}/accounts_data", self.settings.db_path);
+        let account = Account::new_native(description, &base_path);
+        let id = account.id;
+        self.accounts.push(account);
+        tracing::info!("created a new account: {}", id);
+        id
+    }
+}
+impl<D> CustodyService<D>
+where
+    D: KeyValueDB,
+{
     pub fn relayer_endpoint(&self, request_id: String) -> Result<String, CustodyServiceError> {
         let job_id = self
             .db
@@ -226,58 +459,6 @@ impl CustodyService {
             &format!("{}/custody", db_path),
         )
         .unwrap()
-    }
-
-    pub fn new<D: KeyValueDB>(
-        // params: Parameters<Bn256>,
-        settings: CustodyServiceSettings,
-        state: Data<State<D>>,
-        db: Data<Database>,
-    ) -> Self {
-        let base_path = format!("{}/accounts_data", &settings.db_path);
-        let mut accounts = vec![];
-
-        let paths = fs::read_dir(&base_path);
-        if let Ok(paths) = paths {
-            tracing::info!("Loading accounts...");
-            for path in paths {
-                if let Ok(path) = path {
-                    if path.file_type().unwrap().is_dir() {
-                        let account_id = path.file_name();
-                        let account_id = account_id.to_str().unwrap();
-                        tracing::info!("Loading: {}", account_id);
-                        let account = Account::load(&base_path, account_id).unwrap();
-                        accounts.push(account);
-                    }
-                }
-            }
-        }
-
-        let sync_interval = Duration::from_secs(settings.sync_interval_sec);
-        thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            loop {
-                tracing::debug!("Sync custody state...");
-                rt.block_on(state.sync()).unwrap();
-                thread::sleep(sync_interval);
-            }
-        });
-
-        Self {
-            accounts,
-            settings,
-            // params,
-            db,
-        }
-    }
-
-    pub fn new_account(&mut self, description: String) -> Uuid {
-        let base_path = format!("{}/accounts_data", self.settings.db_path);
-        let account = Account::new(&base_path, description);
-        let id = account.id;
-        self.accounts.push(account);
-        tracing::info!("created a new account: {}", id);
-        id
     }
 
     pub async fn gen_address(&self, account_id: Uuid) -> Option<String> {
@@ -370,7 +551,7 @@ impl CustodyService {
         res
     }
 
-    pub async fn sync_account<D: KeyValueDB>(
+    pub async fn sync_accounts(
         &self,
         account_id: Uuid,
         relayer_state: &RelayerState<D>,
@@ -448,7 +629,7 @@ impl CustodyService {
         Ok(())
     }
 
-    pub fn account(&self, account_id: Uuid) -> Result<&Account, CustodyServiceError> {
+    pub fn account(&self, account_id: Uuid) -> Result<&Account<D>, CustodyServiceError> {
         self.accounts
             .iter()
             .find(|account| account.id == account_id)
@@ -519,7 +700,7 @@ impl JobStatusCallback {
         });
     }
 }
-impl ScheduledTask {
+impl <D:KeyValueDB> ScheduledTask <D>{
     // pub fn new(request_id: String, account_id: String, db: Data<Database>, relayer_url: String, params: Data<Parameters<Bn256>> ) -> Self {
     //     Self {
     //         request_id,
@@ -694,7 +875,7 @@ impl ScheduledTask {
         Ok(())
     }
 
-    pub fn save_new(db: Data<Database>, request_id: String) -> Result<(), CustodyServiceError> {
+    pub fn save_new(db: Data<D>, request_id: String) -> Result<(), CustodyServiceError> {
         let mut save_new_task = db.transaction();
 
         save_new_task.put(
@@ -744,8 +925,10 @@ impl ScheduledTask {
                     .as_secs(),
             };
 
-            self.callback_sender.send(job_status_callback).await.unwrap();
-            
+            self.callback_sender
+                .send(job_status_callback)
+                .await
+                .unwrap();
         }
 
         Ok(())

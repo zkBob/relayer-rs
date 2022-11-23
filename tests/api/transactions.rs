@@ -1,4 +1,4 @@
-use crate::helpers::spawn_app;
+use crate::api::helpers::spawn_app;
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
 use libzeropool::constants::OUT;
 use libzeropool::fawkes_crypto::ff_uint::Num;

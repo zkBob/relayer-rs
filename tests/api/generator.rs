@@ -23,7 +23,7 @@ use uuid::Uuid;
 use std::{str::FromStr};
 use web3::{api::Accounts, types::SignedData};
 
-use crate::utils::TestError;
+use crate::api::utils::TestError;
 
 // #[derive(Serialize, Deserialize)]
 // struct Proof {

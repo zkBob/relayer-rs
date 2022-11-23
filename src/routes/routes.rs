@@ -27,10 +27,10 @@ use actix_web_opentelemetry::RequestTracing;
 pub fn run<D: 'static + KeyValueDB>(
     listener: TcpListener,
     state: Data<State<D>>,
-    custody: Data<RwLock<CustodyService>>,
+    custody: Data<RwLock<CustodyService<D>>>,
     params: Data<Parameters<Bn256>>,
-    custody_db: Data<Database>,
-    prover_queue: Data<Sender<ScheduledTask>>
+    custody_db: Data<D>,
+    prover_queue: Data<Sender<ScheduledTask<D>>>
 ) -> Result<Server, std::io::Error> {
     tracing::info!("starting webserver");
 

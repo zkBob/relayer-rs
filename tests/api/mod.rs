@@ -1,4 +1,4 @@
-mod helpers;
+pub mod helpers;
 mod transactions;
 mod sync;
 pub mod generator;

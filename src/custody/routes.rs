@@ -28,12 +28,12 @@ use super::{
     },
 };
 
-pub type Custody = Data<RwLock<CustodyService>>;
+pub type Custody<D> = Data<RwLock<CustodyService<D>>>;
 
 pub async fn account_info<D: KeyValueDB>(
     request: Query<AccountInfoRequest>,
     state: Data<State<D>>,
-    custody: Custody,
+    custody: Custody<D>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let account_id = Uuid::from_str(&request.id).map_err(|err| {
         tracing::error!("failed to parse account id: {}", err);
@@ -47,8 +47,6 @@ pub async fn account_info<D: KeyValueDB>(
         CustodyServiceError::StateSyncError
     })?;
 
-    custody.sync_account(account_id, &state).await?;
-
     let account_info = custody
         .account_info(account_id)
         .await
@@ -60,23 +58,24 @@ pub async fn account_info<D: KeyValueDB>(
 pub async fn signup<D: KeyValueDB>(
     request: Json<SignupRequest>,
     _state: Data<State<D>>,
-    custody: Data<RwLock<CustodyService>>,
+    custody: Data<RwLock<CustodyService<D>>>,
     _params: Data<Parameters<Bn256>>,
-    _custody_db: Data<Database>,
-    _prover_sender: Data<Sender<ScheduledTask>>,
+    _custody_db: Data<D>,
+    _prover_sender: Data<Sender<ScheduledTask<D>>>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let mut custody = custody.write().await;
 
-    let account_id = custody.new_account(request.0.description);
+    // let account_id = custody.create_account(request.0.description);
 
-    Ok(HttpResponse::Ok().json(SignupResponse {
-        account_id: account_id.to_string(),
-    }))
+    // Ok(HttpResponse::Ok().json(SignupResponse {
+    //     account_id: account_id.to_string(),
+    // }))
+    Ok(HttpResponse::Ok().finish())
 }
 
 pub async fn list_accounts<D: KeyValueDB>(
     state: Data<State<D>>,
-    custody: Custody,
+    custody: Custody<D>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
 
@@ -91,10 +90,10 @@ pub async fn list_accounts<D: KeyValueDB>(
 pub async fn transfer<D: KeyValueDB>(
     request: Json<TransferRequest>,
     _state: Data<State<D>>,
-    custody: Custody,
+    custody: Custody<D>,
     params: Data<Parameters<Bn256>>,
-    custody_db: Data<Database>,
-    prover_sender: Data<Sender<ScheduledTask>>,
+    custody_db: Data<D>,
+    prover_sender: Data<Sender<ScheduledTask<D>>>,
     callback_sender: Data<Sender<JobStatusCallback>>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let request: TransferRequest = request.0.into();
@@ -206,7 +205,7 @@ pub async fn fetch_tx_status(
 pub async fn transaction_status<D: KeyValueDB>(
     request: Query<TransferStatusRequest>,
     _: Data<State<D>>,
-    custody: Custody,
+    custody: Custody<D>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
 
@@ -230,7 +229,7 @@ pub async fn transaction_status<D: KeyValueDB>(
 
 pub async fn generate_shielded_address<D: KeyValueDB>(
     request: Query<AccountInfoRequest>,
-    custody: Custody,
+    custody: Custody<D>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let account_id = Uuid::from_str(&request.id).map_err(|err| {
         tracing::error!("failed to parse account id: {}", err);
@@ -248,7 +247,7 @@ pub async fn generate_shielded_address<D: KeyValueDB>(
 pub async fn history<D: KeyValueDB>(
     request: Query<AccountInfoRequest>,
     state: Data<State<D>>,
-    custody: Custody,
+    custody: Custody<D>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let account_id = Uuid::from_str(&request.id).map_err(|err| {
         tracing::error!("failed to parse account id: {}", err);
@@ -257,7 +256,6 @@ pub async fn history<D: KeyValueDB>(
 
     let custody = custody.read().await;
 
-    custody.sync_account(account_id, &state).await?;
 
     let account = custody.account(account_id)?;
     let txs = account

@@ -1,11 +1,11 @@
-use relayer_rs::types::wallet_screening_request::WalletScreeningRequest;
+use relayer_rs::types::wallet_screening_request::{WalletScreeningRequest, TrmRequest};
 use serde_json::json;
 use wiremock::{
     matchers::{method, path},
     Mock, ResponseTemplate,
 };
 
-use crate::helpers::spawn_app;
+use crate::api::helpers::spawn_app;
 
 #[actix_rt::test]
 pub async fn test_trm_route() {
@@ -71,15 +71,14 @@ pub async fn test_trm_route() {
         .await;
 
     let screening_service_endpoint = format!("{}{}", &app.address,"/wallet_screening");
-
-    tracing::warn!("screening_service_endpoint: {}", screening_service_endpoint);
     let middleware_response = reqwest::Client::new()
         .post(screening_service_endpoint)
-        .json(&WalletScreeningRequest {
+        .json(&TrmRequest{ 0: vec![ WalletScreeningRequest {
             account_external_id: Some("foo".to_string()),
             address: "bar".to_string(),
             chain: "baz".to_string(),
-        })
+        }
+        ]})
         .send()
         .await
         .unwrap()

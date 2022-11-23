@@ -20,7 +20,7 @@ pub struct Application<D: 'static + KeyValueDB> {
     host: String,
     port: u16,
     pub state: Data<State<D>>,
-    // pub custody: Data<Mutex<CustodyService>>
+    pub custody: Data<RwLock<CustodyService<D>>>
 }
 
 impl<D: 'static + KeyValueDB> Application<D> {
@@ -31,6 +31,8 @@ impl<D: 'static + KeyValueDB> Application<D> {
         finalized: DB<D>,
         jobs: Data<D>, //We don't realy need a mutex, since all jobs/tx are processed independently
         vk: Option<VK<Bn256>>,
+        custody: CustodyService<D>,
+        custody_db: Data<D>
     ) -> Result<Self, std::io::Error> {
         tracing::info!("using config {:#?}", configuration);
         let vk = vk.unwrap_or(configuration.application.get_tx_vk().unwrap());
@@ -51,29 +53,24 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let address = format!("{}:{}", host, configuration.application.port);
         let listener = TcpListener::bind(address)?;
         let port = listener.local_addr().unwrap().port();
-        let db = Data::new(CustodyService::get_db(&configuration.custody.db_path));
+        
 
-        let (prover_sender, prover_receiver) = mpsc::channel::<ScheduledTask>(100);
-        let (status_updater_sender, status_updater_receiver) = mpsc::channel::<ScheduledTask>(100);
+        let (prover_sender, prover_receiver) = mpsc::channel::<ScheduledTask<D>>(100);
+        let (status_updater_sender, status_updater_receiver) = mpsc::channel::<ScheduledTask<D>>(100);
         // let (webhook_sender, webhook_receiver) = mpsc::channel::<ScheduledTask>(100);
 
         start_prover(prover_receiver, status_updater_sender.clone());
 
         start_status_updater(status_updater_receiver, status_updater_sender);
 
-        let custody:Data<RwLock<CustodyService>> = Data::new(RwLock::new(CustodyService::new(
-            // tx_params,
-            configuration.custody,
-            state.clone(),
-            db.clone(),
-        )));
+        let custody = Data::new(RwLock::new(custody));
 
         let server = routes::run(
             listener,
             state.clone(),
-            custody,
+            custody.clone(),
             tx_params,
-            db,
+            custody_db,
             Data::new(prover_sender),
         )?;
         // let custody = custody.clone();
@@ -82,7 +79,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
             host,
             port,
             state,
-            // custody
+            custody
         })
     }
 

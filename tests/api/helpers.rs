@@ -10,13 +10,13 @@ use libzkbob_rs::merkle::MerkleTree;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::contracts::Pool;
+use relayer_rs::custody::service::CustodyService;
 use relayer_rs::startup::Application;
 use relayer_rs::state::State;
-use relayer_rs::telemetry::{get_subscriber, init_subscriber};
+use relayer_rs::telemetry::{init_sink, init_stdout};
 use relayer_rs::types::job::Job;
-use relayer_rs::state::{Job, State};
-use relayer_rs::telemetry::{ init_stdout, init_sink};
 use relayer_rs::{tx_checker, tx_sender};
+use tokio::sync::RwLock;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{self, Receiver};
 
@@ -30,7 +30,7 @@ use libzeropool::{
 };
 use wiremock::MockServer;
 
-use crate::generator::{self, Generator};
+use crate::api::generator::{self, Generator};
 use libzeropool::fawkes_crypto::circuit::cs::CS;
 pub struct TestApp {
     pub config: Settings,
@@ -40,13 +40,13 @@ pub struct TestApp {
     pub state: Data<State<InMemory>>,
     pub generator: Option<Generator>, // pub pool: Pool
     pub mock_server: MockServer,
+    pub custody : Data<RwLock<CustodyService<InMemory>>>
 }
 
 impl TestApp {
     pub async fn process_job(&mut self) {
         let tree_params = self.config.application.get_tree_params();
-        let pool = Pool::new(&self.config.web3)
-            .expect("failed to instantiate pool contract");
+        let pool = Pool::new(&self.config.web3).expect("failed to instantiate pool contract");
         match self.receiver.try_recv() {
             Ok(job) => tx_sender::process_job(job, &self.state, &tree_params, &pool).await,
             Err(TryRecvError::Empty) => tracing::error!("No messages"),
@@ -75,7 +75,7 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
     let config: Settings = {
         let mut c = get_config().expect("failed to get config");
         c.application.port = 0;
-        c.trm.port =  mock_server.address().port();
+        c.trm.port = mock_server.address().port();
         // c.web3.trm_endpoint = format!("http://127.0.0.1:{}/trm_mock", mock_server.address().port());
         c
     };
@@ -148,6 +148,11 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
             .unwrap_or(prebuilt_vk)
     });
 
+    let custody_db = Data::new(kvdb_memorydb::create(4));
+    let in_memory_custody = CustodyService::new_test(
+        custody_db.clone(), //TBD
+        config.custody.clone(),
+    );
     let app = Application::build(
         config.clone(),
         tree_prover_sender,
@@ -155,12 +160,15 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
         finalized,
         jobs,
         vk,
+        in_memory_custody,
+        custody_db
     )
     .await?;
 
     let state = app.state.clone();
 
     // app.state.sync().await.expect("failed to sync state");
+    let custody = app.custody.clone();
 
     let port = app.port();
 
@@ -179,6 +187,7 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
         state,
         generator,
         mock_server,
+        custody
     };
 
     Ok(test_app)

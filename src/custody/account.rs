@@ -1,31 +1,36 @@
 use kvdb::KeyValueDB;
-use kvdb_rocksdb::DatabaseConfig;
+use kvdb_memorydb::InMemory;
+use kvdb_rocksdb::{Database, DatabaseConfig};
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
 use libzeropool::fawkes_crypto::rand::Rng;
 use libzeropool::POOL_PARAMS;
 use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
 use libzkbob_rs::address;
+use libzkbob_rs::client::state::{Transaction, TxStorage};
 use libzkbob_rs::random::CustomRng;
+
 use libzkbob_rs::{
-    client::{state::State, UserAccount as NativeUserAccount},
+    client::{state::State as ClientState, UserAccount as NativeUserAccount},
     merkle::MerkleTree,
     sparse_array::SparseArray,
 };
 use memo_parser::memo::TxType;
 use memo_parser::memoparser;
-use tokio::sync::RwLock;
 use std::fmt::Display;
 use std::str::FromStr;
+use tokio::sync::RwLock;
 
 use uuid::Uuid;
 
 use crate::contracts::Pool;
-use crate::custody::tx_parser::{self, ParseResult, TxParser, IndexedTx};
+use crate::custody::tx_parser::{self, IndexedTx, ParseResult, TxParser};
 use crate::custody::types::{HistoryTx, PoolParams};
 
 use super::errors::CustodyServiceError;
 use super::tx_parser::StateUpdate;
-use super::types::{HistoryDbColumn, HistoryRecord, HistoryTxType, AccountShortInfo, RelayerState};
+use super::types::{
+    AccountShortInfo, Fr, HistoryDbColumn, HistoryRecord, HistoryTxType, RelayerState,
+};
 
 pub enum DataType {
     Tree,
@@ -49,17 +54,204 @@ pub fn data_file_path(base_path: &str, account_id: Uuid, data_type: DataType) ->
     format!("{}/{}/{}", base_path, account_id.as_hyphenated(), data_type)
 }
 
-
-pub struct Account {
-    pub inner: RwLock<NativeUserAccount<kvdb_rocksdb::Database, PoolBN256>>,
+pub struct Account<D: KeyValueDB> {
+    pub inner: RwLock<NativeUserAccount<D, PoolBN256>>,
     pub id: Uuid,
     pub description: String,
-    pub history: kvdb_rocksdb::Database,
+    pub history: D,
 }
 
-impl Account {
+pub fn new_<D: KeyValueDB>(
+    description: String,
+    state: ClientState<D, PoolBN256>,
+    account_db: D,
+    history_db: D,
+) -> Account<D> {
+    let id = uuid::Uuid::new_v4();
+    // let state = State::new(
+    //     MerkleTree::new_native(
+    //         Default::default(),
+    //         &data_file_path(base_path, id, DataType::Tree),
+    //         POOL_PARAMS.clone(),
+    //     )
+    //     .unwrap(),
+    //     SparseArray::new_native(
+    //         &Default::default(),
+    //         &data_file_path(base_path, id, DataType::Transactions),
+    //     )
+    //     .unwrap(),
+    // );`
 
-    pub async fn sync<D:KeyValueDB>(&self, relayer_state: &RelayerState<D> ) -> Result<(), CustodyServiceError> {
+    let mut rng = CustomRng;
+    let sk: [u8; 32] = rng.gen();
+
+    // let account_db = kvdb_rocksdb::Database::open(
+    //     &DatabaseConfig {
+    //         columns: 1,
+    //         ..Default::default()
+    //     },
+    //     &data_file_path(base_path, id, DataType::AccountData),
+    // )
+    // .unwrap();
+
+    account_db
+        .write({
+            let mut tx = account_db.transaction();
+            tx.put(0, "sk".as_bytes(), &sk);
+            tx.put(0, "description".as_bytes(), description.as_bytes());
+            tx
+        })
+        .unwrap();
+
+    let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
+    Account {
+        inner: RwLock::new(user_account),
+        id,
+        description,
+        history: history_db, // kvdb_rocksdb::Database::open(
+                             //     &DatabaseConfig {
+                             //         columns: 1,
+                             //         ..Default::default()
+                             //     },
+                             //     &data_file_path(base_path, id, DataType::History),
+                             // )
+                             // .unwrap(),
+    }
+}
+impl Account<InMemory> {
+    pub fn new_test(
+        id: Uuid,
+        inner: Option<NativeUserAccount<InMemory, PoolBN256>>,
+    ) -> Result<Account<InMemory>, String> {
+        let account_db = kvdb_memorydb::create(4);
+        let history = kvdb_memorydb::create(4);
+        let tree = MerkleTree::new_test(POOL_PARAMS.clone());
+        let txs = TxStorage::new_test();
+
+        let state = ClientState::new(tree, txs);
+        let sk = account_db.get(0, "sk".as_bytes()).unwrap().unwrap();
+        let description = String::from_utf8(
+            account_db
+                .get(0, "description".as_bytes())
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+
+        let user_account = inner.unwrap_or(NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone()));
+        Ok(Account {
+            inner: RwLock::new(user_account),
+            id,
+            description,
+            history,
+        })
+    }
+}
+impl Account<Database> {
+    pub fn new_native(description: String, base_path: &str) -> Account<Database> {
+        let id = uuid::Uuid::new_v4();
+        let state = ClientState::new(
+            MerkleTree::new_native(
+                Default::default(),
+                &data_file_path(base_path, id, DataType::Tree),
+                POOL_PARAMS.clone(),
+            )
+            .unwrap(),
+            SparseArray::new_native(
+                &Default::default(),
+                &data_file_path(base_path, id, DataType::Transactions),
+            )
+            .unwrap(),
+        );
+
+        let mut rng = CustomRng;
+        let sk: [u8; 32] = rng.gen();
+
+        let account_db = kvdb_rocksdb::Database::open(
+            &DatabaseConfig {
+                columns: 1,
+                ..Default::default()
+            },
+            &data_file_path(base_path, id, DataType::AccountData),
+        )
+        .unwrap();
+
+        account_db
+            .write({
+                let mut tx = account_db.transaction();
+                tx.put(0, "sk".as_bytes(), &sk);
+                tx.put(0, "description".as_bytes(), description.as_bytes());
+                tx
+            })
+            .unwrap();
+
+        let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
+        Account {
+            inner: RwLock::new(user_account),
+            id,
+            description,
+            history: kvdb_rocksdb::Database::open(
+                &DatabaseConfig {
+                    columns: 1,
+                    ..Default::default()
+                },
+                &data_file_path(base_path, id, DataType::History),
+            )
+            .unwrap(),
+        }
+    }
+    pub fn load_native(base_path: &str, account_id: &str) -> Result<Account<Database>, String> {
+        let id = uuid::Uuid::from_str(account_id).map_err(|err| err.to_string())?;
+        let state = ClientState::new(
+            MerkleTree::new_native(
+                Default::default(),
+                &data_file_path(base_path, id, DataType::Tree),
+                POOL_PARAMS.clone(),
+            )
+            .unwrap(),
+            SparseArray::new_native(
+                &Default::default(),
+                &data_file_path(base_path, id, DataType::Transactions),
+            )
+            .unwrap(),
+        );
+
+        let account_db = kvdb_rocksdb::Database::open(
+            &DatabaseConfig {
+                columns: 1,
+                ..Default::default()
+            },
+            &data_file_path(base_path, id, DataType::AccountData),
+        )
+        .unwrap();
+
+        let sk = account_db.get(0, "sk".as_bytes()).unwrap().unwrap();
+        let description = String::from_utf8(
+            account_db
+                .get(0, "description".as_bytes())
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+
+        let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
+        Ok(Account {
+            inner: RwLock::new(user_account),
+            id,
+            description,
+            history: kvdb_rocksdb::Database::open(
+                &DatabaseConfig {
+                    columns: 1,
+                    ..Default::default()
+                },
+                &data_file_path(base_path, id, DataType::History),
+            )
+            .unwrap(),
+        })
+    }
+}
+impl<D: KeyValueDB> Account<D> {
+    pub async fn sync(&self, relayer_state: &RelayerState<D>) -> Result<(), CustodyServiceError> {
         let start_index = self.next_index().await;
         let account_id = self.id;
         let finalized_index = {
@@ -91,7 +283,8 @@ impl Account {
 
         tracing::info!("jobs to sync {:#?}", job_indices);
 
-        let parse_result: ParseResult = TxParser::new().parse_native_tx(self.sk().await, indexed_txs);
+        let parse_result: ParseResult =
+            TxParser::new().parse_native_tx(self.sk().await, indexed_txs);
 
         tracing::info!(
             "retrieved new_accounts: {:#?} \n new notes: {:#?}",
@@ -248,108 +441,5 @@ impl Account {
             })
         }
         history
-    }
-
-    pub fn new(base_path: &str, description: String) -> Self {
-        let id = uuid::Uuid::new_v4();
-        let state = State::new(
-            MerkleTree::new_native(
-                Default::default(),
-                &data_file_path(base_path, id, DataType::Tree),
-                POOL_PARAMS.clone(),
-            )
-            .unwrap(),
-            SparseArray::new_native(
-                &Default::default(),
-                &data_file_path(base_path, id, DataType::Transactions),
-            )
-            .unwrap(),
-        );
-
-        let mut rng = CustomRng;
-        let sk: [u8; 32] = rng.gen();
-
-        let account_db = kvdb_rocksdb::Database::open(
-            &DatabaseConfig {
-                columns: 1,
-                ..Default::default()
-            },
-            &data_file_path(base_path, id, DataType::AccountData),
-        )
-        .unwrap();
-
-        account_db
-            .write({
-                let mut tx = account_db.transaction();
-                tx.put(0, "sk".as_bytes(), &sk);
-                tx.put(0, "description".as_bytes(), description.as_bytes());
-                tx
-            })
-            .unwrap();
-
-        let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
-        Self {
-            inner: RwLock::new(user_account),
-            id,
-            description,
-            history: kvdb_rocksdb::Database::open(
-                &DatabaseConfig {
-                    columns: 1,
-                    ..Default::default()
-                },
-                &data_file_path(base_path, id, DataType::History),
-            )
-            .unwrap(),
-        }
-    }
-
-    pub fn load(base_path: &str, account_id: &str) -> Result<Self, String> {
-        let id = uuid::Uuid::from_str(account_id).map_err(|err| err.to_string())?;
-        let state = State::new(
-            MerkleTree::new_native(
-                Default::default(),
-                &data_file_path(base_path, id, DataType::Tree),
-                POOL_PARAMS.clone(),
-            )
-            .unwrap(),
-            SparseArray::new_native(
-                &Default::default(),
-                &data_file_path(base_path, id, DataType::Transactions),
-            )
-            .unwrap(),
-        );
-
-        let account_db = kvdb_rocksdb::Database::open(
-            &DatabaseConfig {
-                columns: 1,
-                ..Default::default()
-            },
-            &data_file_path(base_path, id, DataType::AccountData),
-        )
-        .unwrap();
-
-        let sk = account_db.get(0, "sk".as_bytes()).unwrap().unwrap();
-        let description = String::from_utf8(
-            account_db
-                .get(0, "description".as_bytes())
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-
-        let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
-        Ok(Self {
-            inner: RwLock::new(user_account),
-            id,
-            description,
-            history: kvdb_rocksdb::Database::open(
-                &DatabaseConfig {
-                    columns: 1,
-                    ..Default::default()
-                },
-                &data_file_path(base_path, id, DataType::History),
-            )
-            .unwrap(),
-        })
     }
 }

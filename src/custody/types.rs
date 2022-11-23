@@ -2,6 +2,7 @@ use crate::state::State;
 use actix_web::web::Data;
 
 use ethabi::ethereum_types::{H256, U64};
+use kvdb::KeyValueDB;
 use libzeropool::{
     fawkes_crypto::{backend::bellman_groth16::{Parameters, engines::Bn256}},
 };
@@ -76,7 +77,7 @@ pub struct AccountInfoRequest {
     pub id: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferRequest {
     pub request_id: Option<String>,
@@ -87,10 +88,10 @@ pub struct TransferRequest {
     pub webhook: Option<String>,
 }
 // #[derive(Clone)]
-pub struct ScheduledTask {
+pub struct ScheduledTask<D:KeyValueDB> {
     pub request_id: String,
     pub account_id: Uuid,
-    pub db: Data< kvdb_rocksdb::Database>,
+    pub db: Data<D>,
     // pub request: TransferRequest,
     pub job_id: Option<Vec<u8>>,
     pub endpoint: Option<String>,
@@ -109,7 +110,7 @@ pub struct ScheduledTask {
 
 
 
-impl Debug for ScheduledTask {
+impl <D:KeyValueDB> Debug for ScheduledTask<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ScheduledTask")
             .field("request_id", &self.request_id)
@@ -174,7 +175,7 @@ pub struct HistoryRecord {
     pub block_num: U64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize,Deserialize,  Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferResponse {
     pub request_id: String,
