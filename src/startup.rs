@@ -1,7 +1,7 @@
 use crate::{
     configuration::Settings,
     contracts::Pool,
-    custody::{service::{CustodyService, start_prover, start_status_updater}, types::ScheduledTask},
+    custody::{service::{CustodyService, start_prover, start_status_updater, JobStatusCallback, start_callback_sender}, types::ScheduledTask},
     routes::routes,
     state::{State, DB},
     types::job::Job,
@@ -55,11 +55,13 @@ impl<D: 'static + KeyValueDB> Application<D> {
 
         let (prover_sender, prover_receiver) = mpsc::channel::<ScheduledTask>(100);
         let (status_updater_sender, status_updater_receiver) = mpsc::channel::<ScheduledTask>(100);
-        // let (webhook_sender, webhook_receiver) = mpsc::channel::<ScheduledTask>(100);
+        let (callback_sender, callback_receiver) = mpsc::channel::<JobStatusCallback>(100);
 
         start_prover(prover_receiver, status_updater_sender.clone());
 
         start_status_updater(status_updater_receiver, status_updater_sender);
+
+        start_callback_sender(callback_receiver, callback_sender.clone());
 
         let custody:Data<RwLock<CustodyService>> = Data::new(RwLock::new(CustodyService::new(
             // tx_params,
@@ -75,6 +77,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
             tx_params,
             db,
             Data::new(prover_sender),
+            Data::new(callback_sender)
         )?;
         // let custody = custody.clone();
         Ok(Self {

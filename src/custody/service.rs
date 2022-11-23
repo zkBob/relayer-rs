@@ -22,9 +22,11 @@ use libzeropool::{
 };
 use memo_parser::memo::TxType as MemoTxType;
 use serde::{Deserialize, Serialize};
+use tracing_futures::Instrument;
 use std::{
     fs, thread,
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+    u64,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
@@ -81,7 +83,7 @@ impl From<String> for TransferStatus {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct JobShortInfo {
     // request_id: String,
     // #[serde(skip)]
@@ -93,6 +95,14 @@ pub struct JobShortInfo {
     failure_reason: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct JobStatusCallback {
+    request_id: String,
+    job_status_info: JobShortInfo,
+    retries_left: u8,
+    timestamp: u64,
+    endpoint: String,
+}
 impl JobShortInfo {
     pub fn new() -> Self {
         Self {
@@ -100,6 +110,66 @@ impl JobShortInfo {
             tx_hash: None,
             failure_reason: None,
         }
+    }
+}
+
+pub fn start_callback_sender(
+    mut callback_receiver: Receiver<JobStatusCallback>,
+    retry_queue: Sender<JobStatusCallback>,
+) {
+    tokio::spawn(async move {
+        while let Some(job_status_callback) = callback_receiver.recv().await {
+            callback_with_retries(job_status_callback, retry_queue.clone()).await;
+        }
+    });
+}
+
+pub async fn callback_with_retries(
+    mut job_status_callback: JobStatusCallback,
+    retry_queue: Sender<JobStatusCallback>,
+) {
+    tracing::debug!(
+        "trying to deliver callback for request {}",
+        &job_status_callback.request_id
+    );
+
+    let client = reqwest::Client::new();
+
+    let body = serde_json::to_value(&job_status_callback.job_status_info).unwrap();
+
+    let resp = client
+        .post(&job_status_callback.endpoint)
+        .json(&body)
+        .send()
+        .await;
+
+    // if !resp.is_ok_and(|r| r.error_for_status().is_ok())  --> this is unstable
+    if let Ok(r) = resp {
+        if r.error_for_status().is_ok() {
+            tracing::debug!(
+                " request {} callback delivered",
+                job_status_callback.request_id
+            );
+            return ();
+        } else {
+            tracing::debug!(
+                "{} got bad status code from callback endpoint, will try again {} times",
+                job_status_callback.request_id,
+                job_status_callback.retries_left
+            );
+        }
+    }
+    if job_status_callback.retries_left > 0 {
+        job_status_callback.retries_left -= 1;
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            retry_queue.send(job_status_callback).await.unwrap();
+        });
+    } else {
+        tracing::debug!(
+            "retries exhausted for callback {} ",
+            job_status_callback.request_id
+        );
     }
 }
 
@@ -202,8 +272,7 @@ impl CustodyService {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             loop {
-                tracing::debug!("Sync custody state...");
-                rt.block_on(state.sync()).unwrap();
+                rt.block_on(state.sync().instrument(tracing::debug_span!("Sync custody state..."))).unwrap();
                 thread::sleep(sync_interval);
             }
         });
@@ -453,6 +522,31 @@ impl CustodyService {
     }
 }
 
+impl JobStatusCallback {
+    pub async fn callback_with_retries(
+        self,
+        endpoint: String,
+        retry_queue: Sender<JobStatusCallback>,
+    ) {
+        let client = reqwest::Client::new();
+
+        // let retry_task = task.clone();
+        let body = serde_json::to_vec(&self.job_status_info).unwrap();
+
+        let resp = client.post(endpoint).body(body).send().await;
+
+        // if !resp.is_ok_and(|r| r.error_for_status().is_ok())  --> this is unstable
+        if let Ok(r) = resp {
+            if r.error_for_status().is_ok() {
+                return ();
+            }
+        }
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            retry_queue.send(self).await.unwrap();
+        });
+    }
+}
 impl ScheduledTask {
     pub async fn fetch_status_with_retries(&mut self) -> Result<(), CustodyServiceError> {
         tracing::info!(
@@ -551,16 +645,21 @@ impl ScheduledTask {
     }
 
     pub async fn make_proof_and_send_to_relayer(&mut self) -> Result<(), CustodyServiceError> {
+        let request_id = self.request_id.clone();
         {
             let tx = self.tx.clone();
             // let account_id = Uuid::from_str(&request.account_id).unwrap();
 
-            let (inputs, proof) = prove_tx(
-                &self.params,
-                &*libzeropool::POOL_PARAMS,
-                tx.public,
-                tx.secret,
-            );
+            let proving_span = tracing::info_span!("proving", request_id = request_id.clone());
+        
+            let (inputs, proof) = proving_span.in_scope(|| {
+                prove_tx(
+                    &self.params,
+                    &*libzeropool::POOL_PARAMS,
+                    tx.public,
+                    tx.secret,
+                )
+            });
 
             let proof = Proof { inputs, proof };
 
@@ -579,6 +678,10 @@ impl ScheduledTask {
                 .json(&tx_request)
                 .header("Content-type", "application/json")
                 .send()
+                .instrument(tracing::info_span!(
+                    "sending to relayer",
+                    request_id = request_id.clone()
+                ))
                 .await
                 .map_err(|e| {
                     tracing::error!(
@@ -615,6 +718,10 @@ impl ScheduledTask {
         }
 
         self.update_status(TransferStatus::Relaying)
+            .instrument(tracing::info_span!(
+                "updating status, new status: Relaying",
+                request_id = request_id
+            ))
             .await
             .map_err(|err| {
                 tracing::error!("failed to save job_id: {}", err);
@@ -642,17 +749,20 @@ impl ScheduledTask {
         &mut self,
         status: TransferStatus,
     ) -> Result<(), CustodyServiceError> {
+        tracing::info!("update status initiated");
+        let job_status_info = JobShortInfo {
+            // job_id: self.job_id.clone(),
+            status: status.clone(),
+            tx_hash: self.tx_hash.clone(),
+            failure_reason: self.failure_reason.clone(),
+        };
+
         let tx = {
             let mut tx = self.db.transaction();
             tx.put(
                 CustodyDbColumn::JobsIndex.into(),
                 self.request_id.as_bytes(),
-                &serde_json::to_vec(&JobShortInfo {
-                    status: status.clone(),
-                    tx_hash: self.tx_hash.clone(),
-                    failure_reason: self.failure_reason.clone(),
-                })
-                .unwrap(),
+                &serde_json::to_vec(&job_status_info).unwrap(),
             );
             tx
         };
@@ -660,14 +770,24 @@ impl ScheduledTask {
             .write(tx)
             .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))?;
 
-        // if webhook_task.endpoint.is_some() {
-        //     match status {
-        //         TransferStatus::Done | TransferStatus::Failed(_) => {
-        //             self.webhook_sender.send(webhook_task).await.unwrap()
-        //         }
-        //         _ => (),
-        //     }
-        // }
+        if let Some(endpoint) = self.callback_address.clone() {
+            tracing::info!("trying to deliver callback");
+            let job_status_callback = JobStatusCallback {
+                request_id: self.request_id.clone(),
+                endpoint,
+                job_status_info,
+                retries_left: 42,
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            };
+
+            self.callback_sender
+                .send(job_status_callback)
+                .await
+                .unwrap();
+        }
 
         Ok(())
     }

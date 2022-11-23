@@ -22,7 +22,7 @@ use crate::{
 
 use super::{
     errors::CustodyServiceError,
-    service::{CustodyDbColumn, CustodyService, JobShortInfo, TransferStatus},
+    service::{CustodyDbColumn, CustodyService, JobShortInfo, JobStatusCallback, TransferStatus},
     types::{
         AccountInfoRequest, Fr, GenerateAddressResponse, ScheduledTask, SignupRequest,
         SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest,
@@ -85,6 +85,7 @@ pub async fn transfer<D: KeyValueDB>(
     params: Data<Parameters<Bn256>>,
     custody_db: Data<Database>,
     prover_sender: Data<Sender<ScheduledTask>>,
+    callback_sender: Data<Sender<JobStatusCallback>>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let request: TransferRequest = request.0.into();
 
@@ -124,7 +125,7 @@ pub async fn transfer<D: KeyValueDB>(
     let db = custody_db.clone();
 
     ScheduledTask::save_new(custody_db, request_id.clone())?;
-    
+
     tracing::info!(
         "{} request received & saved, tx created and sent to the prover queue",
         &request_id
@@ -141,7 +142,9 @@ pub async fn transfer<D: KeyValueDB>(
         relayer_url,
         params,
         db,
-        tx, // custody,
+        tx,
+        callback_address: request.webhook, // custody,
+        callback_sender,
     };
 
     prover_sender.send(task).await.unwrap();
