@@ -507,7 +507,6 @@ impl CustodyService {
                 tracing::error!("failed to get job id from database: {}", err);
                 CustodyServiceError::DataBaseReadError
             })
-           
     }
 
     pub fn get_request_id(&self, nullifier: Vec<u8>) -> Result<String, String> {
@@ -620,6 +619,7 @@ impl ScheduledTask {
             }
         }
     }
+
     pub fn save_nullifier(&self, nullifier: Vec<u8>) -> Result<(), String> {
         let nullifier_exists = self.db.has_key(
             CustodyDbColumn::NullifierIndex.into(), 
