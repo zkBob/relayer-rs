@@ -17,6 +17,7 @@ pub struct ApplicationSettings {
     pub telemetry: TelemetrySettings,
     pub tx: Tx,
     pub tree: Tree,
+    pub db_path: String
     
 }
 #[derive(Debug,Deserialize, Serialize, Clone)]
@@ -94,6 +95,7 @@ pub struct Web3Settings {
     #[serde(skip_serializing)]
     pub credentials: Credentials,
     pub scheduler_interval_sec: u64,
+    pub start_block: Option<u64>,
 }
 
 #[derive(Serialize,Deserialize,Clone,Debug)]

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use actix_web::web::Data;
 use kvdb_memorydb::InMemory;
@@ -12,11 +12,9 @@ use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::contracts::Pool;
 use relayer_rs::startup::Application;
 use relayer_rs::state::State;
-use relayer_rs::telemetry::{get_subscriber, init_subscriber};
 use relayer_rs::types::job::Job;
-use relayer_rs::state::{Job, State};
 use relayer_rs::telemetry::{ init_stdout, init_sink};
-use relayer_rs::{tx_checker, tx_sender};
+use relayer_rs::tx_sender;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{self, Receiver};
 
@@ -30,7 +28,7 @@ use libzeropool::{
 };
 use wiremock::MockServer;
 
-use crate::generator::{self, Generator};
+use crate::generator::Generator;
 use libzeropool::fawkes_crypto::circuit::cs::CS;
 pub struct TestApp {
     pub config: Settings,

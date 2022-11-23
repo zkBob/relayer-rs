@@ -1,3 +1,4 @@
+use ethabi::ethereum_types::{U64, U256};
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
@@ -128,6 +129,7 @@ impl Account {
 
         Ok(())
     }
+
     pub async fn short_info(&self) -> AccountShortInfo {
         let inner = self.inner.read().await;
         AccountShortInfo {
@@ -136,6 +138,7 @@ impl Account {
             balance: inner.state.total_balance().to_string(),
         }
     }
+
     pub async fn update_state(&self, state_update: StateUpdate) {
         let mut inner = self.inner.write().await;
         if !state_update.new_leafs.is_empty() || !state_update.new_commitments.is_empty() {
@@ -186,66 +189,70 @@ impl Account {
             let tx_type = TxType::from_u32(calldata.tx_type);
             let nullifier = calldata.nullifier;
 
-            let (tx_type, amount, to) = match tx_type {
-                TxType::Deposit => (
+            let history_records = match tx_type {
+                TxType::Deposit => vec![(
                     HistoryTxType::Deposit,
                     calldata.token_amount.to_string(),
                     None,
-                ),
-                TxType::DepositPermittable => (
+                )],
+                TxType::DepositPermittable => vec![(
                     HistoryTxType::Deposit,
                     calldata.token_amount.to_string(),
                     None,
-                ),
+                )],
                 TxType::Transfer => {
-                    if dec_memo.in_notes.len() > 0 {
-                        if dec_memo.out_notes.len() > 0 {
-                            // TODO: multitransfer
-                            let note = &dec_memo.out_notes[0].note;
-                            let amount = note.b.to_num();
-                            let address = address::format_address::<PoolParams>(note.d, note.p_d);
-                            (
-                                HistoryTxType::ReturnedChange,
-                                amount.to_string(),
-                                Some(address),
-                            )
-                        } else {
-                            // TODO: multitransfer
-                            let note = &dec_memo.in_notes[0].note;
-                            let amount = note.b.to_num();
-                            let address = address::format_address::<PoolParams>(note.d, note.p_d);
-                            (HistoryTxType::TransferIn, amount.to_string(), Some(address))
-                        }
-                    } else {
-                        // TODO: multitransfer
-                        let note = &dec_memo.out_notes[0].note;
-                        let amount = note.b.to_num();
-                        let address = address::format_address::<PoolParams>(note.d, note.p_d);
-                        (
-                            HistoryTxType::TransferOut,
-                            amount.to_string(),
+                    let mut history_records = vec![];
+                    for note in dec_memo.in_notes.iter() {
+                        let loopback = dec_memo.out_notes
+                            .iter()
+                            .find(|out_note| out_note.index == note.index)
+                            .is_some();
+
+                        let tx_type = if loopback { HistoryTxType::ReturnedChange } else { HistoryTxType::TransferIn };
+                        let address = address::format_address::<PoolParams>(note.note.d, note.note.p_d);
+
+                        history_records.push((
+                            tx_type,
+                            note.note.b.to_num().to_string(),
                             Some(address),
-                        )
+                        ))
                     }
+
+                    let out_notes = dec_memo.out_notes
+                        .iter()
+                        .filter(|out_note| {
+                            dec_memo.in_notes.iter().find(|in_note| in_note.index == out_note.index).is_none()
+                        });
+                    for note in out_notes {
+                        let address = address::format_address::<PoolParams>(note.note.d, note.note.p_d);
+                        history_records.push((
+                            HistoryTxType::TransferOut,
+                            note.note.b.to_num().to_string(),
+                            Some(address),
+                        ))
+                    }
+                    history_records
                 }
-                TxType::Withdrawal => (
+                TxType::Withdrawal => vec![(
                     HistoryTxType::Withdrawal,
                     (-(calldata.memo.fee as i128 + calldata.token_amount)).to_string(),
                     None,
-                ),
+                )],
             };
 
             let transaction_id = get_transaction_id(nullifier).ok();
 
-            let timestamp = pool.block_timestamp(tx.block_num).await.unwrap();
-            history.push(HistoryTx {
-                tx_hash: format!("{:#x}", tx.tx_hash),
-                amount,
-                timestamp: timestamp.to_string(),
-                tx_type,
-                to,
-                transaction_id,
-            })
+            let timestamp = self.block_timestamp(pool, tx.block_num).await;
+            for (tx_type, amount, to) in history_records {
+                history.push(HistoryTx {
+                    tx_hash: format!("{:#x}", tx.tx_hash),
+                    amount,
+                    timestamp: timestamp.to_string(),
+                    tx_type,
+                    to,
+                    transaction_id: transaction_id.clone(),
+                })
+            }
         }
         history
     }
@@ -294,7 +301,7 @@ impl Account {
             description,
             history: kvdb_rocksdb::Database::open(
                 &DatabaseConfig {
-                    columns: 1,
+                    columns: 2,
                     ..Default::default()
                 },
                 &data_file_path(base_path, id, DataType::History),
@@ -344,12 +351,50 @@ impl Account {
             description,
             history: kvdb_rocksdb::Database::open(
                 &DatabaseConfig {
-                    columns: 1,
+                    columns: 2,
                     ..Default::default()
                 },
                 &data_file_path(base_path, id, DataType::History),
             )
             .unwrap(),
         })
+    }
+
+    async fn block_timestamp(&self, pool: &Pool, block_number: U64) -> U256 {
+        let timestamp = self.history
+            .get(
+                HistoryDbColumn::BlockTimestampsCache.into(), 
+                &block_number.as_u64().to_be_bytes()
+            )
+            .ok()
+            .flatten()
+            .map(|bytes| {
+                U256::from_big_endian(&bytes)
+            });
+
+        match timestamp {
+            Some(timestamp) => timestamp,
+            None => {
+                let timestamp = pool.block_timestamp(block_number).await;
+                match timestamp {
+                    Ok(timestamp) => {
+                        self.history.write({
+                            let mut timestamp_bytes = [0; 32];
+                            timestamp.to_big_endian(&mut timestamp_bytes);
+                            
+                            let mut tx = self.history.transaction();
+                            tx.put(
+                                HistoryDbColumn::BlockTimestampsCache.into(), 
+                                &block_number.as_u64().to_be_bytes(), 
+                                &timestamp_bytes
+                            );
+                            tx
+                        }).unwrap();
+                        timestamp
+                    }
+                    Err(_) => Default::default()
+                }
+            }
+        }
     }
 }

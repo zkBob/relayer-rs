@@ -6,7 +6,7 @@ use actix_web::{
     dev::Server,
     middleware,
     web::{self, Data},
-    App, HttpServer,
+    App, HttpServer, HttpResponse,
 };
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
@@ -14,7 +14,7 @@ use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Param
 use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
-    custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::CustodyService, types::ScheduledTask},
+    custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::{CustodyService, JobStatusCallback}, types::ScheduledTask},
     routes::{self, wallet_screening},
     state::State,
 };
@@ -30,7 +30,8 @@ pub fn run<D: 'static + KeyValueDB>(
     custody: Data<RwLock<CustodyService>>,
     params: Data<Parameters<Bn256>>,
     custody_db: Data<Database>,
-    prover_queue: Data<Sender<ScheduledTask>>
+    prover_queue: Data<Sender<ScheduledTask>>,
+    callback_queue: Data<Sender<JobStatusCallback>>
 ) -> Result<Server, std::io::Error> {
     tracing::info!("starting webserver");
 
@@ -46,6 +47,7 @@ pub fn run<D: 'static + KeyValueDB>(
             .wrap(cors)
             .wrap(RequestTracing::new())
             .wrap(middleware::Logger::default())
+            .route("/", web::get().to(|| HttpResponse::Ok()))
             .route("/tx", web::get().to(routes::query))
             .route("/info", web::get().to(routes::info::<D>))
             .route("/fee", web::get().to(routes::fee::<D>))
@@ -75,6 +77,7 @@ pub fn run<D: 'static + KeyValueDB>(
             .app_data(params.clone())
             .app_data(custody_db.clone())
             .app_data(prover_queue.clone())
+            .app_data(callback_queue.clone())
     })
     .listen(listener)?
     .run();

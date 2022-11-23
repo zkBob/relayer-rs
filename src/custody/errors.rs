@@ -33,6 +33,8 @@ pub enum CustodyServiceError {
     TaskRejectedByRelayer(String),
     #[error("need retry")]
     RetryNeeded,
+    #[error("access denied")]
+    AccessDenied,
 }
 
 impl ResponseError for CustodyServiceError {
@@ -43,6 +45,7 @@ impl ResponseError for CustodyServiceError {
             | CustodyServiceError::BadRequest(_)
             | CustodyServiceError::IncorrectAccountId
             | CustodyServiceError::AccountNotFound => StatusCode::BAD_REQUEST,
+            CustodyServiceError::AccessDenied => StatusCode::UNAUTHORIZED,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
