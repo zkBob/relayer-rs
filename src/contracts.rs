@@ -189,6 +189,10 @@ impl Pool {
         Ok(block.timestamp)
     }
 
+    pub async fn block_number(&self) -> Result<U64, Web3Error> {
+        self.web3.eth().block_number().await
+    }
+
     async fn gas_price(&self) -> Result<U256, Web3Error> {
         self.web3.eth().gas_price().await
     }

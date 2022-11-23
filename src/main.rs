@@ -24,18 +24,24 @@ async fn main() -> Result<(), std::io::Error> {
 
     let (sender, receiver) = mpsc::channel::<Job>(1000);
 
-    let pending =
-        MerkleTree::new_native(Default::default(), "pending.db", POOL_PARAMS.clone()).unwrap();
+    let pending = MerkleTree::new_native(
+        Default::default(), 
+        &format!("{}/pending.db", configuration.application.db_path), 
+        POOL_PARAMS.clone()
+    ).unwrap();
 
-    let finalized =
-        MerkleTree::new_native(Default::default(), "finalized.db", POOL_PARAMS.clone()).unwrap();
+    let finalized = MerkleTree::new_native(
+        Default::default(), 
+        &format!("{}/finalized.db", configuration.application.db_path), 
+        POOL_PARAMS.clone()
+    ).unwrap();
 
     let jobs = Data::new(Database::open(
         &DatabaseConfig {
-            columns: 4,
+            columns: 5,
             ..Default::default()
         },
-        "jobs.db",
+        &format!("{}/jobs.db", configuration.application.db_path), 
     )?);
 
     let pending = Data::new(Mutex::new(pending));

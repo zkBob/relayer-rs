@@ -22,13 +22,13 @@ use libzeropool::{
 };
 use memo_parser::memo::TxType as MemoTxType;
 use serde::{Deserialize, Serialize};
+use tracing_futures::Instrument;
 use std::{
     fs, thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
     u64,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{info_span, Instrument};
 use uuid::Uuid;
 
 use super::{
@@ -57,7 +57,6 @@ impl Into<u32> for CustodyDbColumn {
 pub struct CustodyService {
     pub settings: CustodyServiceSettings,
     pub accounts: Vec<Account>,
-    // pub params: Parameters<Bn256>,
     pub db: Data<kvdb_rocksdb::Database>,
 }
 
@@ -74,7 +73,11 @@ pub enum TransferStatus {
 impl From<String> for TransferStatus {
     fn from(val: String) -> Self {
         match val.as_str() {
-            "complete" => Self::Done,
+            "waiting" => Self::Relaying,
+            "sent" => Self::Mining,
+            "reverted" => Self::Failed(CustodyServiceError::RelayerSendError), // TODO: fix error
+            "completed" => Self::Done,
+            "failed" => Self::Failed(CustodyServiceError::RelayerSendError),
             _ => Self::Failed(CustodyServiceError::RelayerSendError),
         }
     }
@@ -208,6 +211,7 @@ pub fn start_status_updater(
         }
     });
 }
+
 impl CustodyService {
     pub fn relayer_endpoint(&self, request_id: String) -> Result<String, CustodyServiceError> {
         let job_id = self
@@ -233,8 +237,14 @@ impl CustodyService {
         .unwrap()
     }
 
+    pub fn validate_token(&self, bearer_token: &str) -> Result<(), CustodyServiceError> {
+        if self.settings.admin_token != bearer_token {
+            return Err(CustodyServiceError::AccessDenied)
+        }
+        Ok(())
+    }
+
     pub fn new<D: KeyValueDB>(
-        // params: Parameters<Bn256>,
         settings: CustodyServiceSettings,
         state: Data<State<D>>,
         db: Data<Database>,
@@ -270,7 +280,6 @@ impl CustodyService {
         Self {
             accounts,
             settings,
-            // params,
             db,
         }
     }
@@ -295,6 +304,39 @@ impl CustodyService {
                 Some(account.generate_address())
             }
             None => None,
+        }
+    }
+
+    pub async fn webhook_callback_with_retries(task: ScheduledTask, queue: Sender<ScheduledTask>) {
+        let client = reqwest::Client::new();
+
+        let endpoint = task.endpoint.as_ref().unwrap();
+
+        // let retry_task = task.clone();
+        let body = serde_json::to_vec(&TransactionStatusResponse {
+            status: task.status.clone(),
+            tx_hash: task.tx_hash.clone(),
+            failure_reason: task.failure_reason.clone(),
+        })
+        .unwrap();
+
+        match client.post(endpoint).body(body).send().await {
+            Ok(resp) => {
+                if resp.error_for_status().is_err() {
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                        queue.send(task).await.unwrap();
+                    })
+                    .await
+                    .unwrap();
+                }
+            }
+            Err(_) => tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                queue.send(task).await.unwrap();
+            })
+            .await
+            .unwrap(),
         }
     }
 
@@ -459,30 +501,13 @@ impl CustodyService {
             .ok_or(CustodyServiceError::AccountNotFound)
     }
 
-    // pub fn move_account(&self, account_id: Uuid) -> Result<Account, CustodyServiceError> {
-    //     self.accounts
-    //         .into_iter()
-    //         .find(|account| account.id == account_id)
-    //         .ok_or(CustodyServiceError::AccountNotFound)
-    // }
-
-    pub fn get_job_id_by_request_id(
-        &self,
-        request_id: &str,
-    ) -> Result<Option<String>, CustodyServiceError> {
-        self.db
-            .get(CustodyDbColumn::JobsIndex.into(), request_id.as_bytes())
+    pub fn has_request_id(&self, request_id: &str) -> Result<bool, CustodyServiceError> {
+        self.db.has_key(CustodyDbColumn::JobsIndex.into(), request_id.as_bytes())
             .map_err(|err| {
                 tracing::error!("failed to get job id from database: {}", err);
                 CustodyServiceError::DataBaseReadError
-            })?
-            .map(|id| {
-                String::from_utf8(id).map_err(|err| {
-                    tracing::error!("failed to parse job id from database: {}", err);
-                    CustodyServiceError::DataBaseReadError
-                })
             })
-            .map_or(Ok(None), |v| v.map(Some))
+           
     }
 
     pub fn get_request_id(&self, nullifier: Vec<u8>) -> Result<String, String> {
@@ -524,22 +549,6 @@ impl JobStatusCallback {
     }
 }
 impl ScheduledTask {
-    // pub fn new(request_id: String, account_id: String, db: Data<Database>, relayer_url: String, params: Data<Parameters<Bn256>> ) -> Self {
-    //     Self {
-    //         request_id,
-    //         account_id ,
-    //         db,
-    //         job_id: None,
-    //         endpoint: None,
-    //         relayer_url,
-    //         retries_left: 42,
-    //         status : TransferStatus::Newew,
-    //         tx_hash: None,
-    //         failure_reason: None,
-    //         params,
-    //         tx: todo!(),
-    //     }
-    // }
     pub async fn fetch_status_with_retries(&mut self) -> Result<(), CustodyServiceError> {
         tracing::info!(
             "fetchin status for task {}, retries left {}",
@@ -612,16 +621,27 @@ impl ScheduledTask {
         }
     }
     pub fn save_nullifier(&self, nullifier: Vec<u8>) -> Result<(), String> {
-        let tx = {
-            let mut tx = self.db.transaction();
-            tx.put(
-                CustodyDbColumn::NullifierIndex.into(),
-                &nullifier,
-                self.request_id.as_bytes(),
-            );
-            tx
-        };
-        self.db.write(tx).map_err(|err| err.to_string())
+        let nullifier_exists = self.db.has_key(
+            CustodyDbColumn::NullifierIndex.into(), 
+            &nullifier
+        ).unwrap();
+
+        if !nullifier_exists {
+            let tx = {
+                let mut tx = self.db.transaction();
+                tx.put(
+                    CustodyDbColumn::NullifierIndex.into(),
+                    &nullifier,
+                    self.request_id.as_bytes(),
+                );
+                tx
+            };
+            self.db.write(tx).map_err(|err| err.to_string())
+        } else {
+            // TODO: what to do in this case?
+            // we shouldn't overwrite existed value
+            Ok(())
+        }
     }
 
     pub async fn make_proof_and_send_to_relayer(&mut self) -> Result<(), CustodyServiceError> {

@@ -6,7 +6,7 @@ use actix_web::{
     dev::Server,
     middleware,
     web::{self, Data},
-    App, HttpServer,
+    App, HttpServer, HttpResponse,
 };
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
@@ -47,7 +47,7 @@ pub fn run<D: 'static + KeyValueDB>(
             .wrap(cors)
             .wrap(RequestTracing::new())
             .wrap(middleware::Logger::default())
-            .route("/mock_callback", web::post().to(crate::custody::routes::mock_callback))
+            .route("/", web::get().to(|| HttpResponse::Ok()))
             .route("/tx", web::get().to(routes::query))
             .route("/info", web::get().to(routes::info::<D>))
             .route("/fee", web::get().to(routes::fee::<D>))
