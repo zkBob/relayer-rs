@@ -12,7 +12,7 @@ use std::{fmt::Debug};
 
 use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}, client::TransactionData};
 
-use super::{service::{TransferStatus, JobStatusCallback}, tx_parser::DecMemo};
+use super::{service::JobStatusCallback, tx_parser::DecMemo, scheduled_task::TransferStatus};
 
 #[derive(Serialize)]
 pub struct AccountShortInfo {
@@ -86,45 +86,6 @@ pub struct TransferRequest {
     pub to: String,
 
     pub webhook: Option<String>,
-}
-// #[derive(Clone)]
-pub struct ScheduledTask {
-    pub request_id: String,
-    pub account_id: Uuid,
-    pub db: Data< kvdb_rocksdb::Database>,
-    // pub request: TransferRequest,
-    pub job_id: Option<Vec<u8>>,
-    pub endpoint: Option<String>,
-    pub relayer_url: String,
-    pub retries_left: u8,
-    pub status: TransferStatus,
-    pub tx_hash: Option<String>,
-    pub failure_reason: Option<String>,
-    pub callback_address: Option<String>,
-    // pub account: Data<Account>,
-    pub params: Data<Parameters<Bn256>>,
-    // pub custody: Data<RwLock<CustodyService>>
-    pub tx: TransactionData<Fr>,
-    pub callback_sender: Data<Sender<JobStatusCallback>>
-}
-
-
-
-impl Debug for ScheduledTask {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ScheduledTask")
-            .field("request_id", &self.request_id)
-            // .field("request", &self.request)
-            .field("job_id", &self.job_id)
-            .field("endpoint", &self.endpoint)
-            .field("relayer_url", &self.relayer_url)
-            .field("retries_left", &self.retries_left)
-            .field("status", &self.status)
-            .field("tx_hash", &self.tx_hash)
-            .field("failure_reason", &self.failure_reason)
-            
-            .finish()
-    }
 }
 
 #[derive(Serialize)]

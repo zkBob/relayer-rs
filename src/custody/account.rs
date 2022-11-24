@@ -23,7 +23,7 @@ use crate::contracts::Pool;
 use crate::custody::types::{HistoryTx, PoolParams};
 
 use super::tx_parser::StateUpdate;
-use super::types::{HistoryDbColumn, HistoryRecord, HistoryTxType, AccountShortInfo};
+use super::types::{HistoryDbColumn, HistoryRecord, HistoryTxType, AccountShortInfo, Fr};
 
 pub enum DataType {
     Tree,
@@ -56,6 +56,15 @@ pub struct Account {
 }
 
 impl Account {
+    pub async fn max_tx_amount(&self) -> Num<Fr> {
+        let account = self.inner.read().await;
+        let mut tx_amount = account.state.account_balance();
+        for (_, note) in account.state.get_usable_notes().iter().take(3) {
+            tx_amount += note.b.as_num();
+        }
+        tx_amount
+    }
+
     pub async fn short_info(&self) -> AccountShortInfo {
         let inner = self.inner.read().await;
         AccountShortInfo {

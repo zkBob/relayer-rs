@@ -14,7 +14,7 @@ use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Param
 use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
-    custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::{CustodyService, JobStatusCallback}, types::ScheduledTask},
+    custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::{CustodyService, JobStatusCallback}, scheduled_task::ScheduledTask},
     routes::{self, wallet_screening},
     state::State,
 };

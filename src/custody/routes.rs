@@ -15,18 +15,18 @@ use tokio::sync::{mpsc::Sender, RwLock};
 use uuid::Uuid;
 
 use crate::{
-    custody::types::TransferResponse,
+    custody::{types::TransferResponse, scheduled_task::TransferStatus},
     routes::job::JobResponse,
     state::State
 };
 
 use super::{
     errors::CustodyServiceError,
-    service::{CustodyDbColumn, CustodyService, JobShortInfo, JobStatusCallback, TransferStatus},
+    service::{CustodyDbColumn, CustodyService, JobShortInfo, JobStatusCallback},
     types::{
-        AccountInfoRequest, Fr, GenerateAddressResponse, ScheduledTask, SignupRequest,
+        AccountInfoRequest, Fr, GenerateAddressResponse, SignupRequest,
         SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest,
-    },
+    }, scheduled_task::ScheduledTask,
 };
 
 pub type Custody = Data<RwLock<CustodyService>>;
@@ -109,7 +109,7 @@ pub async fn transfer<D: KeyValueDB>(
     let account = custody.account(account_id)?;
     let account = account.inner.read().await;
 
-    let fee = 100000000;
+    let fee: u64 = 100000000;
     let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
 
     let tx_output: TxOutput<Fr> = TxOutput {
