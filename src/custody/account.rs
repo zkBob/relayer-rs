@@ -68,10 +68,6 @@ impl Account {
         
         let notes = account.state.get_usable_notes();
         for notes in notes.chunks(3) {
-            if notes.len() == 0 {
-                return Err(CustodyServiceError::InsufficientBalance);
-            }
-
             let mut note_balance = Num::ZERO;
             for (_, note) in notes {
                 note_balance += note.b.as_num();
@@ -79,6 +75,7 @@ impl Account {
 
             if (note_balance + account_balance).to_uint() >= (remaining_amount + fee).to_uint() {
                 amounts.push(remaining_amount);
+                remaining_amount = Num::ZERO;
                 break;
             } else {
                 amounts.push(note_balance + account_balance - fee);
@@ -87,6 +84,12 @@ impl Account {
 
             account_balance = Num::ZERO;
         }
+
+        let zero: Num<Fr> = Num::ZERO;
+        if remaining_amount.to_uint() > zero.to_uint() {
+            return Err(CustodyServiceError::InsufficientBalance);
+        }
+
         Ok(amounts)
     }
 
