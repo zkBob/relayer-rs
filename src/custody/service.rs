@@ -26,9 +26,9 @@ use tracing_futures::Instrument;
 use std::{
     fs, thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
-    u64,
+    u64
 };
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::{mpsc::{Receiver, Sender}, RwLock};
 use uuid::Uuid;
 
 use super::{
@@ -52,12 +52,6 @@ impl Into<u32> for CustodyDbColumn {
     fn into(self) -> u32 {
         self as u32
     }
-}
-
-pub struct CustodyService {
-    pub settings: CustodyServiceSettings,
-    pub accounts: Vec<Account>,
-    pub db: Data<kvdb_rocksdb::Database>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -85,9 +79,6 @@ impl From<String> for TransferStatus {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JobShortInfo {
-    // request_id: String,
-    // #[serde(skip)]
-    // job_id: Option<Vec<u8>>,
     status: TransferStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     tx_hash: Option<String>,
@@ -212,6 +203,13 @@ pub fn start_status_updater(
     });
 }
 
+pub struct CustodyService {
+    pub settings: CustodyServiceSettings,
+    pub accounts: Vec<Account>,
+    pub db: Data<kvdb_rocksdb::Database>,
+    next_index: Data<RwLock<u64>>
+}
+
 impl CustodyService {
     pub fn relayer_endpoint(&self, request_id: String) -> Result<String, CustodyServiceError> {
         let job_id = self
@@ -269,10 +267,16 @@ impl CustodyService {
         }
 
         let sync_interval = Duration::from_secs(settings.sync_interval_sec);
+        let next_index = Data::new(RwLock::new(0));
+        let next_index_clone = next_index.clone();
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             loop {
-                rt.block_on(state.sync().instrument(tracing::debug_span!("Sync custody state..."))).unwrap();
+                rt.block_on(async {
+                    state.sync().instrument(tracing::debug_span!("Sync custody state...")).await.unwrap();
+                    let mut next_index = next_index_clone.write().await;
+                    *next_index = state.finalized.lock().unwrap().next_index();
+                });
                 thread::sleep(sync_interval);
             }
         });
@@ -281,6 +285,7 @@ impl CustodyService {
             accounts,
             settings,
             db,
+            next_index,
         }
     }
 
@@ -427,8 +432,7 @@ impl CustodyService {
         tracing::info!("account {} found", account_id);
         let start_index = account.next_index().await;
         let finalized_index = {
-            let finalized = relayer_state.finalized.lock().unwrap();
-            finalized.next_index()
+            self.next_index.read().await.clone()
         };
         tracing::info!(
             "account {}, account_index = {}, finalized index = {} ",
