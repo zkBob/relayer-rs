@@ -35,6 +35,8 @@ pub enum CustodyServiceError {
     RetryNeeded,
     #[error("access denied")]
     AccessDenied,
+    #[error("previous tx failed")]
+    PreviousTxFailed,
 }
 
 impl ResponseError for CustodyServiceError {

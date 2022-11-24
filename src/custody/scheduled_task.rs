@@ -2,23 +2,24 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use actix_web::web::Data;
 use kvdb::KeyValueDB;
-use libzeropool::fawkes_crypto::backend::bellman_groth16::{Parameters, engines::Bn256};
-use libzkbob_rs::{proof::prove_tx, client::TransactionData};
+use libzeropool::fawkes_crypto::{backend::bellman_groth16::{Parameters, engines::Bn256}, ff_uint::{Num, NumRepr}};
+use libzkbob_rs::{proof::prove_tx, client::{TransactionData, TxOutput, TokenAmount, TxType}};
 use serde::{Serialize, Deserialize};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, RwLock};
 use tracing_futures::Instrument;
 use uuid::Uuid;
 use core::fmt::Debug;
 
 use crate::{custody::{routes::fetch_tx_status, service::JobStatusCallback}, types::{transaction_request::{TransactionRequest, Proof}, job::Response}, helpers::BytesRepr};
 
-use super::{errors::CustodyServiceError, service::{JobShortInfo, CustodyDbColumn}, types::Fr};
+use super::{errors::CustodyServiceError, service::{JobShortInfo, CustodyDbColumn, CustodyService}, types::Fr};
 use memo_parser::memo::TxType as MemoTxType;
 
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TransferStatus {
     New,
+    Queued,
     Proving,
     Relaying,
     Mining,
@@ -53,8 +54,12 @@ pub struct ScheduledTask {
     pub failure_reason: Option<String>,
     pub callback_address: Option<String>,
     pub params: Data<Parameters<Bn256>>,
-    pub tx: TransactionData<Fr>,
-    pub callback_sender: Data<Sender<JobStatusCallback>>
+    pub tx: Option<TransactionData<Fr>>,
+    pub callback_sender: Data<Sender<JobStatusCallback>>,
+    
+    pub amount: Num<Fr>,
+    pub to: String,
+    pub custody: Data<RwLock<CustodyService>>,
 }
 
 impl Debug for ScheduledTask {
@@ -78,7 +83,7 @@ impl ScheduledTask {
     pub async fn make_proof_and_send_to_relayer(&mut self) -> Result<(), CustodyServiceError> {
         let request_id = self.request_id.clone();
         {
-            let tx = self.tx.clone();
+            let tx = self.tx.clone().unwrap();
 
             let proving_span = tracing::info_span!("proving", request_id = request_id.clone());
         
@@ -179,7 +184,6 @@ impl ScheduledTask {
                     Some(tx_hash) => {
                         // let mut task = self.clone();
                         self.tx_hash = Some(tx_hash);
-                        // self.status = TransferStatus::Done;
                         self.update_status(TransferStatus::Done).await.unwrap();
                         tracing::info!("marked task {} of request with id {} as done", &self.task_index, &self.request_id);
                         Ok(())
@@ -264,7 +268,7 @@ impl ScheduledTask {
             let mut tx = self.db.transaction();
             tx.put(
                 CustodyDbColumn::JobsIndex.into(),
-                &self.task_key(),
+                &ScheduledTask::task_key(&self.request_id, self.task_index),
                 &serde_json::to_vec(&job_status_info).unwrap(),
             );
             tx
@@ -295,7 +299,59 @@ impl ScheduledTask {
         Ok(())
     }
 
-    fn task_key(&self) -> Vec<u8> {
-        [self.request_id.as_bytes(), &self.task_index.to_be_bytes()].concat()
+    pub async fn prepare_task(&mut self) -> Result<TransferStatus, CustodyServiceError> {
+        let index = self.task_index;
+        if index == 0 {
+            self.update_status(TransferStatus::Proving).await?;
+            return Ok(TransferStatus::Proving);
+        }
+
+        let previous_job = self.db.get(
+            CustodyDbColumn::JobsIndex.into(), 
+            &ScheduledTask::task_key(&self.request_id, index - 1)
+        )
+        .map_err(|_| CustodyServiceError::DataBaseReadError)?.unwrap();
+
+        let previous_job: JobShortInfo = serde_json::from_slice(&previous_job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+
+        match previous_job.status {
+            TransferStatus::Done => {
+                let tx = {
+                    let custody = self.custody.read().await;
+                    let account = custody.account(self.account_id)?;
+                    let account = account.inner.read().await;
+
+                    // TODO: move to config
+                    let fee: u64 = 100000000;
+                    let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
+
+                    let tx_output: TxOutput<Fr> = TxOutput {
+                        to: self.to.clone(),
+                        amount: TokenAmount::new(self.amount),
+                    };
+                    let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], vec![tx_output]);
+
+                    account
+                        .create_tx(transfer, None, None)
+                        .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))?
+                };
+
+                self.tx = Some(tx);
+                self.update_status(TransferStatus::Proving).await?;
+                Ok(TransferStatus::Proving)
+            }
+            TransferStatus::Failed(_) => {
+                self.update_status(TransferStatus::Failed(CustodyServiceError::PreviousTxFailed)).await?;
+                Ok(TransferStatus::Failed(CustodyServiceError::PreviousTxFailed))
+            }
+            _ => {
+                self.update_status(TransferStatus::Queued).await?;
+                Ok(TransferStatus::Queued)
+            }
+        }
+    }
+
+    fn task_key(request_id: &str, task_index: u32) -> Vec<u8> {
+        [request_id.as_bytes(), &task_index.to_be_bytes()].concat()
     }
 }

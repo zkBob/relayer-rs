@@ -143,10 +143,21 @@ pub async fn callback_with_retries(
 
 pub fn start_prover(
     mut prover_receiver: Receiver<ScheduledTask>,
+    prover_sender: Sender<ScheduledTask>,
     status_sender: Sender<ScheduledTask>,
 ) {
     tokio::task::spawn(async move {
         while let Some(mut task) = prover_receiver.recv().await {
+            match task.prepare_task().await.unwrap() {
+                TransferStatus::Failed(_) => continue,
+                TransferStatus::Proving => {},
+                TransferStatus::Queued => {
+                    prover_sender.send(task).await.unwrap();
+                    continue;
+                }
+                _ => unreachable!(),
+            };
+
             match task.make_proof_and_send_to_relayer().await {
                 Ok(_) => {
                     status_sender.send(task).await.unwrap();

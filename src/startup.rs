@@ -57,7 +57,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let (status_updater_sender, status_updater_receiver) = mpsc::channel::<ScheduledTask>(100);
         let (callback_sender, callback_receiver) = mpsc::channel::<JobStatusCallback>(100);
 
-        start_prover(prover_receiver, status_updater_sender.clone());
+        start_prover(prover_receiver, prover_sender.clone(), status_updater_sender.clone());
 
         start_status_updater(status_updater_receiver, status_updater_sender);
 

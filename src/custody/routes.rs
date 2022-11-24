@@ -94,6 +94,7 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
+    let custody_clone = custody.clone();
     let custody = custody.read().await;
     let relayer_url = custody.settings.relayer_url.clone();
     custody.sync_account(account_id, &state).await?;
@@ -141,9 +142,12 @@ pub async fn transfer<D: KeyValueDB>(
         relayer_url,
         params,
         db,
-        tx,
+        tx: Some(tx),
         callback_address: request.webhook, // custody,
         callback_sender,
+        amount: Num::from_uint(NumRepr::from(request.amount)).unwrap(),
+        to: request.to.clone(),
+        custody: custody_clone,
     };
 
     task.update_status(TransferStatus::New).await?;
