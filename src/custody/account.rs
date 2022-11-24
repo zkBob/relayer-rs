@@ -1,6 +1,7 @@
 use ethabi::ethereum_types::{U64, U256};
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
+use libzeropool::fawkes_crypto::ff_uint::NumRepr;
 use libzeropool::fawkes_crypto::rand::Rng;
 use libzeropool::POOL_PARAMS;
 use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
@@ -22,6 +23,7 @@ use uuid::Uuid;
 use crate::contracts::Pool;
 use crate::custody::types::{HistoryTx, PoolParams};
 
+use super::errors::CustodyServiceError;
 use super::tx_parser::StateUpdate;
 use super::types::{HistoryDbColumn, HistoryRecord, HistoryTxType, AccountShortInfo, Fr};
 
@@ -56,13 +58,36 @@ pub struct Account {
 }
 
 impl Account {
-    pub async fn max_tx_amount(&self) -> Num<Fr> {
+    pub async fn get_txs_amounts(&self, total_amount: u64, fee: u64) -> Result<Vec<Num<Fr>>, CustodyServiceError> {
         let account = self.inner.read().await;
-        let mut tx_amount = account.state.account_balance();
-        for (_, note) in account.state.get_usable_notes().iter().take(3) {
-            tx_amount += note.b.as_num();
+        let mut remaining_amount = Num::from_uint(NumRepr::from(total_amount)).unwrap();
+        let fee = Num::from_uint(NumRepr::from(fee)).unwrap();
+
+        let mut account_balance = account.state.account_balance();
+        let mut amounts = vec![];
+        
+        let notes = account.state.get_usable_notes();
+        for notes in notes.chunks(3) {
+            if notes.len() == 0 {
+                return Err(CustodyServiceError::InsufficientBalance);
+            }
+
+            let mut note_balance = Num::ZERO;
+            for (_, note) in notes {
+                note_balance += note.b.as_num();
+            }
+
+            if (note_balance + account_balance).to_uint() >= (remaining_amount + fee).to_uint() {
+                amounts.push(remaining_amount);
+                break;
+            } else {
+                amounts.push(note_balance + account_balance - fee);
+                remaining_amount -= note_balance + account_balance - fee;
+            }
+
+            account_balance = Num::ZERO;
         }
-        tx_amount
+        Ok(amounts)
     }
 
     pub async fn short_info(&self) -> AccountShortInfo {

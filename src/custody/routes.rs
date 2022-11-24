@@ -7,9 +7,8 @@ use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
 use libzeropool::fawkes_crypto::{
     backend::bellman_groth16::{engines::Bn256, Parameters},
-    ff_uint::{Num, NumRepr},
 };
-use libzkbob_rs::client::{TokenAmount, TransactionData, TxOutput, TxType};
+
 use std::str::FromStr;
 use tokio::sync::{mpsc::Sender, RwLock};
 use uuid::Uuid;
@@ -24,7 +23,7 @@ use super::{
     errors::CustodyServiceError,
     service::{CustodyService, JobShortInfo, JobStatusCallback, CustodyDbColumn},
     types::{
-        AccountInfoRequest, Fr, GenerateAddressResponse, SignupRequest,
+        AccountInfoRequest, GenerateAddressResponse, SignupRequest,
         SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest,
     }, scheduled_task::ScheduledTask,
 };
@@ -108,52 +107,43 @@ pub async fn transfer<D: KeyValueDB>(
     }
 
     let account = custody.account(account_id)?;
-    let account = account.inner.read().await;
 
+    // TODO: config
     let fee: u64 = 100000000;
-    let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
 
-    let tx_output: TxOutput<Fr> = TxOutput {
-        to: request.to.clone(),
-        amount: TokenAmount::new(Num::from_uint(NumRepr::from(request.amount)).unwrap()),
-    };
-    let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], vec![tx_output]);
+    let txs_amounts = account.get_txs_amounts(request.amount, fee).await?;
+    for (i, amount) in txs_amounts.iter().enumerate() {
+        let mut task = ScheduledTask {
+            request_id: request_id.clone(),
+            task_index: i as u32,
+            account_id,
+            job_id: None,
+            endpoint: None,
+            retries_left: 42,
+            status: TransferStatus::New,
+            tx_hash: None,
+            failure_reason: None,
+            relayer_url: relayer_url.clone(),
+            params: params.clone(),
+            db: custody_db.clone(),
+            tx: None,
+            callback_address: request.webhook.clone(),
+            callback_sender: callback_sender.clone(),
+            amount: amount.clone(),
+            to: request.to.clone(),
+            custody: custody_clone.clone(),
+        };
+    
+        task.update_status(TransferStatus::New).await?;
+        prover_sender.send(task).await.unwrap();
+    }
 
-    let tx: TransactionData<Fr> = account
-        .create_tx(transfer, None, None)
-        .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))?;
-
-    let db = custody_db.clone();
+    custody.save_tasks_count(&request_id, txs_amounts.len() as u32)?;
 
     tracing::info!(
         "{} request received & saved, tx created and sent to the prover queue",
         &request_id
     );
-    let mut task = ScheduledTask {
-        request_id: request_id.clone(),
-        task_index: 0,
-        account_id,
-        job_id: None,
-        endpoint: None,
-        retries_left: 42,
-        status: TransferStatus::New,
-        tx_hash: None,
-        failure_reason: None,
-        relayer_url,
-        params,
-        db,
-        tx: Some(tx),
-        callback_address: request.webhook, // custody,
-        callback_sender,
-        amount: Num::from_uint(NumRepr::from(request.amount)).unwrap(),
-        to: request.to.clone(),
-        custody: custody_clone,
-    };
-
-    task.update_status(TransferStatus::New).await?;
-    custody.save_tasks_count(&request_id, 1)?;
-
-    prover_sender.send(task).await.unwrap();
 
     Ok(HttpResponse::Ok().json(TransferResponse {
         request_id: request_id.clone(),

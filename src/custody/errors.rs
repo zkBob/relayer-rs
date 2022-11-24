@@ -37,6 +37,8 @@ pub enum CustodyServiceError {
     AccessDenied,
     #[error("previous tx failed")]
     PreviousTxFailed,
+    #[error("insufficient balance")]
+    InsufficientBalance,
 }
 
 impl ResponseError for CustodyServiceError {

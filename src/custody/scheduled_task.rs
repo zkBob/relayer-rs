@@ -301,20 +301,24 @@ impl ScheduledTask {
 
     pub async fn prepare_task(&mut self) -> Result<TransferStatus, CustodyServiceError> {
         let index = self.task_index;
-        if index == 0 {
-            self.update_status(TransferStatus::Proving).await?;
-            return Ok(TransferStatus::Proving);
-        }
+            
+        let previous_status = {
+            if index == 0 {
+                // first task is always ready
+                TransferStatus::Done
+            } else {
+                let previous_job = self.db.get(
+                    CustodyDbColumn::JobsIndex.into(), 
+                    &ScheduledTask::task_key(&self.request_id, index - 1)
+                )
+                .map_err(|_| CustodyServiceError::DataBaseReadError)?.unwrap();
+    
+                let previous_job: JobShortInfo = serde_json::from_slice(&previous_job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+                previous_job.status
+            }
+        };
 
-        let previous_job = self.db.get(
-            CustodyDbColumn::JobsIndex.into(), 
-            &ScheduledTask::task_key(&self.request_id, index - 1)
-        )
-        .map_err(|_| CustodyServiceError::DataBaseReadError)?.unwrap();
-
-        let previous_job: JobShortInfo = serde_json::from_slice(&previous_job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
-
-        match previous_job.status {
+        match previous_status {
             TransferStatus::Done => {
                 let tx = {
                     let custody = self.custody.read().await;
