@@ -1,5 +1,4 @@
 use std::{
-    sync::Mutex,
     time::SystemTime, io,
 };
 
@@ -17,7 +16,7 @@ use libzeropool::{
 };
 use libzkbob_rs::merkle::MerkleTree;
 use memo_parser::memoparser;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, Mutex};
 use tracing_futures::Instrument;
 use uuid::Uuid;
 use web3::types::BlockNumber;
@@ -69,8 +68,8 @@ pub struct State<D: 'static + KeyValueDB> {
 
 impl<D: 'static + KeyValueDB> State<D> {
     pub async fn sync(&self) -> Result<(), SyncError> {
-        let mut finalized = self.finalized.lock().expect("failed to acquire lock");
-        let mut pending = self.pending.lock().expect("failed to acquire lock");
+        let mut finalized = self.finalized.lock().await;
+        let mut pending = self.pending.lock().await;
 
         {
             let pool = &self.pool;

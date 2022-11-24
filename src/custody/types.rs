@@ -1,5 +1,4 @@
 use crate::state::State;
-use actix_web::web::Data;
 
 use ethabi::ethereum_types::{H256, U64};
 use serde::{Deserialize, Serialize};
@@ -41,7 +40,7 @@ pub type PoolParams = PoolBN256;
 pub type Fr = <PoolParams as PoolParamsTrait>::Fr;
 pub type Fs = <PoolParams as PoolParamsTrait>::Fs;
 
-pub type RelayerState<D> = Data<State<D>>;
+pub type RelayerState<D> = State<D>;
 
 // #[derive(Serialize)]
 // struct TransactionData {

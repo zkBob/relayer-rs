@@ -83,7 +83,7 @@ pub async fn transfer<D: KeyValueDB>(
     custody: Custody,
     params: Data<Parameters<Bn256>>,
     custody_db: Data<Database>,
-    prover_sender: Data<Sender<ScheduledTask>>,
+    prover_sender: Data<Sender<ScheduledTask<D>>>,
     callback_sender: Data<Sender<JobStatusCallback>>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let request: TransferRequest = request.0.into();
@@ -132,9 +132,11 @@ pub async fn transfer<D: KeyValueDB>(
             amount: amount.clone(),
             to: request.to.clone(),
             custody: custody_clone.clone(),
+            state: state.clone(),
         };
     
-        task.update_status(TransferStatus::New).await?;
+        let status = if i == 0 { TransferStatus::New } else { TransferStatus::Queued };
+        task.update_status(status).await?;
         prover_sender.send(task).await.unwrap();
     }
 

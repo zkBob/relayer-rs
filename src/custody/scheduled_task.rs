@@ -10,7 +10,7 @@ use tracing_futures::Instrument;
 use uuid::Uuid;
 use core::fmt::Debug;
 
-use crate::{custody::{routes::fetch_tx_status, service::JobStatusCallback}, types::{transaction_request::{TransactionRequest, Proof}, job::Response}, helpers::BytesRepr};
+use crate::{custody::{routes::fetch_tx_status, service::JobStatusCallback}, types::{transaction_request::{TransactionRequest, Proof}, job::Response}, helpers::BytesRepr, state::State};
 
 use super::{errors::CustodyServiceError, service::{JobShortInfo, CustodyDbColumn, CustodyService}, types::Fr};
 use memo_parser::memo::TxType as MemoTxType;
@@ -40,7 +40,7 @@ impl From<String> for TransferStatus {
     }
 }
 
-pub struct ScheduledTask {
+pub struct ScheduledTask<D:'static + KeyValueDB> {
     pub request_id: String,
     pub task_index: u32,
     pub account_id: Uuid,
@@ -60,9 +60,10 @@ pub struct ScheduledTask {
     pub amount: Num<Fr>,
     pub to: String,
     pub custody: Data<RwLock<CustodyService>>,
+    pub state: Data<State<D>>,
 }
 
-impl Debug for ScheduledTask {
+impl<D: KeyValueDB> Debug for ScheduledTask<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ScheduledTask")
             .field("task_index", &self.task_index)
@@ -79,7 +80,7 @@ impl Debug for ScheduledTask {
     }
 }
 
-impl ScheduledTask {
+impl<D: KeyValueDB> ScheduledTask<D> {
     pub async fn make_proof_and_send_to_relayer(&mut self) -> Result<(), CustodyServiceError> {
         let request_id = self.request_id.clone();
         {
@@ -184,9 +185,22 @@ impl ScheduledTask {
                     Some(tx_hash) => {
                         // let mut task = self.clone();
                         self.tx_hash = Some(tx_hash);
-                        self.update_status(TransferStatus::Done).await.unwrap();
-                        tracing::info!("marked task {} of request with id {} as done", &self.task_index, &self.request_id);
-                        Ok(())
+                        let status = TransferStatus::from(relayer_response.status);
+                        self.update_status(status.clone()).await.unwrap();
+
+                        match status {
+                            TransferStatus::Done => {
+                                tracing::info!("marked task {} of request with id {} as done", &self.task_index, &self.request_id);
+                                Ok(())
+                            }
+                            TransferStatus::Failed(_) => {
+                                Ok(())
+                            }
+                            _ => {
+                                Err(CustodyServiceError::RetryNeeded)   
+                            }
+                        }
+                        
                     }
                     // transaction not mined
                     None => {
@@ -268,7 +282,7 @@ impl ScheduledTask {
             let mut tx = self.db.transaction();
             tx.put(
                 CustodyDbColumn::JobsIndex.into(),
-                &ScheduledTask::task_key(&self.request_id, self.task_index),
+                &Self::task_key(&self.request_id, self.task_index),
                 &serde_json::to_vec(&job_status_info).unwrap(),
             );
             tx
@@ -309,7 +323,7 @@ impl ScheduledTask {
             } else {
                 let previous_job = self.db.get(
                     CustodyDbColumn::JobsIndex.into(), 
-                    &ScheduledTask::task_key(&self.request_id, index - 1)
+                    &Self::task_key(&self.request_id, index - 1)
                 )
                 .map_err(|_| CustodyServiceError::DataBaseReadError)?.unwrap();
     
@@ -320,8 +334,11 @@ impl ScheduledTask {
 
         match previous_status {
             TransferStatus::Done => {
+                self.state.sync().await.unwrap();
+
                 let tx = {
                     let custody = self.custody.read().await;
+                    custody.sync_account(self.account_id, &self.state).await?;
                     let account = custody.account(self.account_id)?;
                     let account = account.inner.read().await;
 
@@ -349,7 +366,7 @@ impl ScheduledTask {
                 Ok(TransferStatus::Failed(CustodyServiceError::PreviousTxFailed))
             }
             _ => {
-                self.update_status(TransferStatus::Queued).await?;
+                //self.update_status(TransferStatus::Queued).await?;
                 Ok(TransferStatus::Queued)
             }
         }

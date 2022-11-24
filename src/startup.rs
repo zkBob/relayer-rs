@@ -53,8 +53,8 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let port = listener.local_addr().unwrap().port();
         let db = Data::new(CustodyService::get_db(&configuration.custody.db_path));
 
-        let (prover_sender, prover_receiver) = mpsc::channel::<ScheduledTask>(100);
-        let (status_updater_sender, status_updater_receiver) = mpsc::channel::<ScheduledTask>(100);
+        let (prover_sender, prover_receiver) = mpsc::channel::<ScheduledTask<D>>(100);
+        let (status_updater_sender, status_updater_receiver) = mpsc::channel::<ScheduledTask<D>>(100);
         let (callback_sender, callback_receiver) = mpsc::channel::<JobStatusCallback>(100);
 
         start_prover(prover_receiver, prover_sender.clone(), status_updater_sender.clone());

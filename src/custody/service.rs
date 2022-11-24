@@ -141,10 +141,10 @@ pub async fn callback_with_retries(
     }
 }
 
-pub fn start_prover(
-    mut prover_receiver: Receiver<ScheduledTask>,
-    prover_sender: Sender<ScheduledTask>,
-    status_sender: Sender<ScheduledTask>,
+pub fn start_prover<D: KeyValueDB>(
+    mut prover_receiver: Receiver<ScheduledTask<D>>,
+    prover_sender: Sender<ScheduledTask<D>>,
+    status_sender: Sender<ScheduledTask<D>>,
 ) {
     tokio::task::spawn(async move {
         while let Some(mut task) = prover_receiver.recv().await {
@@ -171,9 +171,9 @@ pub fn start_prover(
     });
 }
 
-pub fn start_status_updater(
-    mut status_updater_receiver: Receiver<ScheduledTask>,
-    status_updater_sender: Sender<ScheduledTask>,
+pub fn start_status_updater<D: KeyValueDB>(
+    mut status_updater_receiver: Receiver<ScheduledTask<D>>,
+    status_updater_sender: Sender<ScheduledTask<D>>,
 ) {
     tokio::task::spawn(async move {
         while let Some(mut task) = status_updater_receiver.recv().await {
@@ -263,7 +263,7 @@ impl CustodyService {
                 rt.block_on(async {
                     state.sync().instrument(tracing::debug_span!("Sync custody state...")).await.unwrap();
                     let mut next_index = next_index_clone.write().await;
-                    *next_index = state.finalized.lock().unwrap().next_index();
+                    *next_index = state.finalized.lock().await.next_index();
                 });
                 thread::sleep(sync_interval);
             }
@@ -300,7 +300,7 @@ impl CustodyService {
         }
     }
 
-    pub async fn webhook_callback_with_retries(task: ScheduledTask, queue: Sender<ScheduledTask>) {
+    pub async fn webhook_callback_with_retries<D: KeyValueDB>(task: ScheduledTask<D>, queue: Sender<ScheduledTask<D>>) {
         let client = reqwest::Client::new();
 
         let endpoint = task.endpoint.as_ref().unwrap();

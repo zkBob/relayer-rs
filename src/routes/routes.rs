@@ -30,7 +30,7 @@ pub fn run<D: 'static + KeyValueDB>(
     custody: Data<RwLock<CustodyService>>,
     params: Data<Parameters<Bn256>>,
     custody_db: Data<Database>,
-    prover_queue: Data<Sender<ScheduledTask>>,
+    prover_queue: Data<Sender<ScheduledTask<D>>>,
     callback_queue: Data<Sender<JobStatusCallback>>
 ) -> Result<Server, std::io::Error> {
     tracing::info!("starting webserver");

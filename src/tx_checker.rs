@@ -61,7 +61,7 @@ pub async fn check_tx<D: KeyValueDB>(
             state
                 .finalized
                 .lock()
-                .unwrap()
+                .await
                 .add_leafs_and_commitments(vec![], vec![(job.index, job.commitment)]);
 
             job.status = JobStatus::Done;
@@ -86,9 +86,9 @@ pub async fn check_tx<D: KeyValueDB>(
                 tx_receipt.block_number.unwrap()
             );
 
-            let mut pending = state.pending.lock().unwrap();
+            let mut pending = state.pending.lock().await;
 
-            let finalized = state.finalized.lock().unwrap();
+            let finalized = state.finalized.lock().await;
 
             pending.rollback(finalized.next_index());
 
