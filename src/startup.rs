@@ -1,7 +1,7 @@
 use crate::{
     configuration::Settings,
     contracts::Pool,
-    custody::{service::{CustodyService, start_prover, start_status_updater, JobStatusCallback, start_callback_sender}, types::ScheduledTask},
+    custody::{service::{CustodyService, start_prover, start_status_updater, JobStatusCallback, start_callback_sender}, scheduled_task::ScheduledTask},
     routes::routes,
     state::{State, DB},
     types::job::Job,

@@ -22,7 +22,7 @@ use crate::{
 
 use super::{
     errors::CustodyServiceError,
-    service::{CustodyDbColumn, CustodyService, JobShortInfo, JobStatusCallback},
+    service::{CustodyService, JobShortInfo, JobStatusCallback, CustodyDbColumn},
     types::{
         AccountInfoRequest, Fr, GenerateAddressResponse, SignupRequest,
         SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest,
@@ -124,19 +124,18 @@ pub async fn transfer<D: KeyValueDB>(
 
     let db = custody_db.clone();
 
-    ScheduledTask::save_new(custody_db, request_id.clone())?;
-
     tracing::info!(
         "{} request received & saved, tx created and sent to the prover queue",
         &request_id
     );
-    let task = ScheduledTask {
+    let mut task = ScheduledTask {
         request_id: request_id.clone(),
+        task_index: 0,
         account_id,
         job_id: None,
         endpoint: None,
         retries_left: 42,
-        status: TransferStatus::Proving,
+        status: TransferStatus::New,
         tx_hash: None,
         failure_reason: None,
         relayer_url,
@@ -146,6 +145,9 @@ pub async fn transfer<D: KeyValueDB>(
         callback_address: request.webhook, // custody,
         callback_sender,
     };
+
+    task.update_status(TransferStatus::New).await?;
+    custody.save_tasks_count(&request_id, 1)?;
 
     prover_sender.send(task).await.unwrap();
 
@@ -191,19 +193,24 @@ pub async fn transaction_status<D: KeyValueDB>(
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
 
-    let job = custody
-        .db
-        .get(
-            CustodyDbColumn::JobsIndex.into(),
-            &request.0.request_id.into_bytes(),
-        )
-        .map_err(|_| CustodyServiceError::DataBaseReadError)?
-        .ok_or(CustodyServiceError::TransactionNotFound)?;
+    let task_keys = custody.task_keys(&request.0.request_id)?;
+    let mut jobs = vec![];
+    for task_key in task_keys {
+        let job = custody
+            .db
+            .get(
+                CustodyDbColumn::JobsIndex.into(),
+                &task_key,
+            )
+            .map_err(|_| CustodyServiceError::DataBaseReadError)?
+            .ok_or(CustodyServiceError::TransactionNotFound)?;
 
-    let job: JobShortInfo =
-        serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+        let job: JobShortInfo =
+            serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+        jobs.push(job);
+    }
 
-    Ok(HttpResponse::Ok().json(job))
+    Ok(HttpResponse::Ok().json(jobs))
 }
 
 pub async fn generate_shielded_address<D: KeyValueDB>(

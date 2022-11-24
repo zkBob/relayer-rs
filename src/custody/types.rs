@@ -2,17 +2,12 @@ use crate::state::State;
 use actix_web::web::Data;
 
 use ethabi::ethereum_types::{H256, U64};
-use libzeropool::{
-    fawkes_crypto::{backend::bellman_groth16::{Parameters, engines::Bn256}},
-};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::Sender;
-use uuid::Uuid;
 use std::{fmt::Debug};
 
-use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}, client::TransactionData};
+use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}};
 
-use super::{service::JobStatusCallback, tx_parser::DecMemo, scheduled_task::TransferStatus};
+use super::{tx_parser::DecMemo, scheduled_task::TransferStatus};
 
 #[derive(Serialize)]
 pub struct AccountShortInfo {

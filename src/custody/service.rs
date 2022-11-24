@@ -39,8 +39,11 @@ use libzkbob_rs::{
     client::{TokenAmount, TxType}
 };
 
+pub const CUSTODY_DB_COLUMN_COUNT: u32 = 3;
+
 pub enum CustodyDbColumn {
     JobsIndex,
+    TxRequestIndex,
     NullifierIndex,
 }
 
@@ -201,7 +204,7 @@ impl CustodyService {
     pub fn get_db(db_path: &str) -> Database {
         kvdb_rocksdb::Database::open(
             &DatabaseConfig {
-                columns: 2,
+                columns: CUSTODY_DB_COLUMN_COUNT,
                 ..Default::default()
             },
             &format!("{}/custody", db_path),
@@ -497,6 +500,22 @@ impl CustodyService {
         let request_id = String::from_utf8(request_id).map_err(|err| err.to_string())?;
 
         Ok(request_id)
+    }
+
+    pub fn save_tasks_count(&self, request_id: &str, count: u32) -> Result<(), CustodyServiceError> {
+        self.db.write({
+            let mut tx = self.db.transaction();
+            tx.put(CustodyDbColumn::TxRequestIndex.into(), request_id.as_bytes(), &count.to_be_bytes());
+            tx
+        })
+        .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))
+    }
+
+    pub fn task_keys(&self, request_id: &str) -> Result<Vec<Vec<u8>>, CustodyServiceError> {
+        let count = self.db.get(CustodyDbColumn::TxRequestIndex.into(), request_id.as_bytes())
+            .map_err(|_| CustodyServiceError::DataBaseReadError)?.unwrap();
+        let count: u32 = u32::from_be_bytes(count.try_into().unwrap());
+        Ok((0..count).map(|index| [request_id.as_bytes(), &index.to_be_bytes()].concat()).collect::<Vec<_>>())
     }
 }
 

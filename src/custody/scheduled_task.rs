@@ -2,7 +2,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use actix_web::web::Data;
 use kvdb::KeyValueDB;
-use kvdb_rocksdb::Database;
 use libzeropool::fawkes_crypto::backend::bellman_groth16::{Parameters, engines::Bn256};
 use libzkbob_rs::{proof::prove_tx, client::TransactionData};
 use serde::{Serialize, Deserialize};
@@ -13,7 +12,7 @@ use core::fmt::Debug;
 
 use crate::{custody::{routes::fetch_tx_status, service::JobStatusCallback}, types::{transaction_request::{TransactionRequest, Proof}, job::Response}, helpers::BytesRepr};
 
-use super::{errors::CustodyServiceError, service::{CustodyDbColumn, JobShortInfo}, types::Fr};
+use super::{errors::CustodyServiceError, service::{JobShortInfo, CustodyDbColumn}, types::Fr};
 use memo_parser::memo::TxType as MemoTxType;
 
 
@@ -42,6 +41,7 @@ impl From<String> for TransferStatus {
 
 pub struct ScheduledTask {
     pub request_id: String,
+    pub task_index: u32,
     pub account_id: Uuid,
     pub db: Data< kvdb_rocksdb::Database>,
     pub job_id: Option<Vec<u8>>,
@@ -60,8 +60,8 @@ pub struct ScheduledTask {
 impl Debug for ScheduledTask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ScheduledTask")
+            .field("task_index", &self.task_index)
             .field("request_id", &self.request_id)
-            // .field("request", &self.request)
             .field("job_id", &self.job_id)
             .field("endpoint", &self.endpoint)
             .field("relayer_url", &self.relayer_url)
@@ -75,107 +75,10 @@ impl Debug for ScheduledTask {
 }
 
 impl ScheduledTask {
-    pub async fn fetch_status_with_retries(&mut self) -> Result<(), CustodyServiceError> {
-        tracing::info!(
-            "fetchin status for task {}, retries left {}",
-            &self.request_id,
-            &self.retries_left
-        );
-        // let request_id = task.request.request_id.as_ref().unwrap();
-        let endpoint = self.endpoint.as_ref().unwrap();
-        match fetch_tx_status(&endpoint).await {
-            //we have successfuly retrieved job status from relayer
-            Ok(relayer_response) => {
-                match relayer_response.tx_hash {
-                    // transaction has been mined, set tx_hash and status
-                    //TODO: call webhook on_complete
-                    Some(tx_hash) => {
-                        // let mut task = self.clone();
-                        self.tx_hash = Some(tx_hash);
-                        // self.status = TransferStatus::Done;
-                        self.update_status(TransferStatus::Done).await.unwrap();
-                        tracing::info!("marked request {} as done", &self.request_id);
-                        Ok(())
-                    }
-                    // transaction not mined
-                    None => {
-                        // transaction rejected
-                        if let Some(failure_reason) = relayer_response.failure_reason {
-                            self.status = TransferStatus::Failed(
-                                CustodyServiceError::TaskRejectedByRelayer(failure_reason.clone()),
-                            );
-                            self.update_status(TransferStatus::Failed(
-                                CustodyServiceError::TaskRejectedByRelayer(failure_reason),
-                            ))
-                            .await
-                            .unwrap();
-                            Ok(())
-                        // waiting for transaction to be mined, schedule a retry
-                        } else {
-                            Err(CustodyServiceError::RetryNeeded)
-                            // tokio::spawn(async move {
-                            //     tokio::time::sleep(Duration::from_secs(30)).await;
-                            //     status_sender.send(self).await.unwrap();
-                            // });
-                        }
-                    }
-                }
-            }
-            //we couldn't get valid response
-            Err(_) => {
-                // let mut task = self.clone();
-                if self.retries_left > 0 {
-                    self.retries_left -= 1;
-                    Err(CustodyServiceError::RetryNeeded)
-                    //schedule a retry, reduce retry count
-                    // tokio::spawn(async move {
-                    //     tokio::time::sleep(Duration::from_secs(30)).await;
-                    //     status_sender.send(self).await.unwrap();
-                    // });
-                } else {
-                    //if no more retries left, mark request as failed to prevent resource exhaustion
-                    //TODO: increase lag exponentialy
-                    tracing::error!("retries exhausted for task {:#?}", self);
-                    self.update_status(TransferStatus::Failed(
-                        CustodyServiceError::RetriesExhausted,
-                    ))
-                    .await
-                    .unwrap();
-                    Err(CustodyServiceError::RetriesExhausted)
-                }
-            }
-        }
-    }
-
-    pub fn save_nullifier(&self, nullifier: Vec<u8>) -> Result<(), String> {
-        let nullifier_exists = self.db.has_key(
-            CustodyDbColumn::NullifierIndex.into(), 
-            &nullifier
-        ).unwrap();
-
-        if !nullifier_exists {
-            let tx = {
-                let mut tx = self.db.transaction();
-                tx.put(
-                    CustodyDbColumn::NullifierIndex.into(),
-                    &nullifier,
-                    self.request_id.as_bytes(),
-                );
-                tx
-            };
-            self.db.write(tx).map_err(|err| err.to_string())
-        } else {
-            // TODO: what to do in this case?
-            // we shouldn't overwrite existed value
-            Ok(())
-        }
-    }
-
     pub async fn make_proof_and_send_to_relayer(&mut self) -> Result<(), CustodyServiceError> {
         let request_id = self.request_id.clone();
         {
             let tx = self.tx.clone();
-            // let account_id = Uuid::from_str(&request.account_id).unwrap();
 
             let proving_span = tracing::info_span!("proving", request_id = request_id.clone());
         
@@ -258,27 +161,100 @@ impl ScheduledTask {
         Ok(())
     }
 
-    pub fn save_new(db: Data<Database>, request_id: String) -> Result<(), CustodyServiceError> {
-        let mut save_new_task = db.transaction();
-
-        save_new_task.put(
-            CustodyDbColumn::JobsIndex.into(),
-            request_id.as_bytes(),
-            &serde_json::to_vec(&JobShortInfo::new()).unwrap(),
+    pub async fn fetch_status_with_retries(&mut self) -> Result<(), CustodyServiceError> {
+        tracing::info!(
+            "fetchin status for request_id {}, task index {}, retries left {}",
+            &self.request_id,
+            &self.task_index,
+            &self.retries_left
         );
-
-        db.write(save_new_task)
-            .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))?;
-
-        Ok(())
+        
+        let endpoint = self.endpoint.as_ref().unwrap();
+        match fetch_tx_status(&endpoint).await {
+            //we have successfuly retrieved job status from relayer
+            Ok(relayer_response) => {
+                match relayer_response.tx_hash {
+                    // transaction has been mined, set tx_hash and status
+                    //TODO: call webhook on_complete
+                    Some(tx_hash) => {
+                        // let mut task = self.clone();
+                        self.tx_hash = Some(tx_hash);
+                        // self.status = TransferStatus::Done;
+                        self.update_status(TransferStatus::Done).await.unwrap();
+                        tracing::info!("marked task {} of request with id {} as done", &self.task_index, &self.request_id);
+                        Ok(())
+                    }
+                    // transaction not mined
+                    None => {
+                        // transaction rejected
+                        if let Some(failure_reason) = relayer_response.failure_reason {
+                            self.status = TransferStatus::Failed(
+                                CustodyServiceError::TaskRejectedByRelayer(failure_reason.clone()),
+                            );
+                            self.update_status(TransferStatus::Failed(
+                                CustodyServiceError::TaskRejectedByRelayer(failure_reason),
+                            ))
+                            .await
+                            .unwrap();
+                            Ok(())
+                        // waiting for transaction to be mined, schedule a retry
+                        } else {
+                            Err(CustodyServiceError::RetryNeeded)
+                        }
+                    }
+                }
+            }
+            //we couldn't get valid response
+            Err(_) => {
+                // let mut task = self.clone();
+                if self.retries_left > 0 {
+                    self.retries_left -= 1;
+                    Err(CustodyServiceError::RetryNeeded)
+                } else {
+                    //if no more retries left, mark request as failed to prevent resource exhaustion
+                    //TODO: increase lag exponentialy
+                    tracing::error!("retries exhausted for task {:#?}", self);
+                    self.update_status(TransferStatus::Failed(
+                        CustodyServiceError::RetriesExhausted,
+                    ))
+                    .await
+                    .unwrap();
+                    Err(CustodyServiceError::RetriesExhausted)
+                }
+            }
+        }
     }
+
+    pub fn save_nullifier(&self, nullifier: Vec<u8>) -> Result<(), String> {
+        let nullifier_exists = self.db.has_key(
+            CustodyDbColumn::NullifierIndex.into(), 
+            &nullifier
+        ).unwrap();
+
+        if !nullifier_exists {
+            let tx = {
+                let mut tx = self.db.transaction();
+                tx.put(
+                    CustodyDbColumn::NullifierIndex.into(),
+                    &nullifier,
+                    self.request_id.as_bytes(),
+                );
+                tx
+            };
+            self.db.write(tx).map_err(|err| err.to_string())
+        } else {
+            // TODO: what to do in this case?
+            // we shouldn't overwrite existed value
+            Ok(())
+        }
+    }
+
     pub async fn update_status(
         &mut self,
         status: TransferStatus,
     ) -> Result<(), CustodyServiceError> {
         tracing::info!("update status initiated");
         let job_status_info = JobShortInfo {
-            // job_id: self.job_id.clone(),
             status: status.clone(),
             tx_hash: self.tx_hash.clone(),
             failure_reason: self.failure_reason.clone(),
@@ -288,7 +264,7 @@ impl ScheduledTask {
             let mut tx = self.db.transaction();
             tx.put(
                 CustodyDbColumn::JobsIndex.into(),
-                self.request_id.as_bytes(),
+                &self.task_key(),
                 &serde_json::to_vec(&job_status_info).unwrap(),
             );
             tx
@@ -317,5 +293,9 @@ impl ScheduledTask {
         }
 
         Ok(())
+    }
+
+    fn task_key(&self) -> Vec<u8> {
+        [self.request_id.as_bytes(), &self.task_index.to_be_bytes()].concat()
     }
 }
