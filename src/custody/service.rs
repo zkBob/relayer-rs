@@ -33,7 +33,7 @@ use super::{
     config::CustodyServiceSettings,
     errors::CustodyServiceError,
     tx_parser::{self, IndexedTx, TxParser},
-    types::{AccountShortInfo, Fr, RelayerState, TransactionStatusResponse}, scheduled_task::{TransferStatus, ScheduledTask},
+    types::{AccountShortInfo, Fr, RelayerState, TransactionStatusResponse, JobShortInfo}, scheduled_task::{TransferStatus, ScheduledTask},
 };
 use libzkbob_rs::{
     client::{TokenAmount, TxType}
@@ -54,31 +54,12 @@ impl Into<u32> for CustodyDbColumn {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct JobShortInfo {
-    pub status: TransferStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tx_hash: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failure_reason: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct JobStatusCallback {
     pub request_id: String,
     pub job_status_info: JobShortInfo,
     pub retries_left: u8,
     pub timestamp: u64,
     pub endpoint: String,
-}
-
-impl JobShortInfo {
-    pub fn new() -> Self {
-        Self {
-            status: TransferStatus::New,
-            tx_hash: None,
-            failure_reason: None,
-        }
-    }
 }
 
 pub fn start_callback_sender(

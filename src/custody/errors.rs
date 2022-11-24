@@ -3,7 +3,7 @@ use actix_web::{http::header::ContentType, HttpResponse, ResponseError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Clone, Serialize, Deserialize, Debug, Error)]
+#[derive(Clone, Serialize, Deserialize, Debug, Error, PartialEq)]
 pub enum CustodyServiceError {
     #[error("request malformed or invalid: {0}")]
     BadRequest(String),

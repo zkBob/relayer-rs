@@ -10,13 +10,12 @@ use tracing_futures::Instrument;
 use uuid::Uuid;
 use core::fmt::Debug;
 
-use crate::{custody::{routes::fetch_tx_status, service::JobStatusCallback}, types::{transaction_request::{TransactionRequest, Proof}, job::Response}, helpers::BytesRepr, state::State};
+use crate::{custody::{routes::fetch_tx_status, service::JobStatusCallback, types::JobShortInfo}, types::{transaction_request::{TransactionRequest, Proof}, job::Response}, helpers::BytesRepr, state::State};
 
-use super::{errors::CustodyServiceError, service::{JobShortInfo, CustodyDbColumn, CustodyService}, types::Fr};
+use super::{errors::CustodyServiceError, service::{CustodyDbColumn, CustodyService}, types::Fr};
 use memo_parser::memo::TxType as MemoTxType;
 
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum TransferStatus {
     New,
     Queued,
@@ -183,10 +182,12 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                     // transaction has been mined, set tx_hash and status
                     //TODO: call webhook on_complete
                     Some(tx_hash) => {
-                        // let mut task = self.clone();
                         self.tx_hash = Some(tx_hash);
                         let status = TransferStatus::from(relayer_response.status);
-                        self.update_status(status.clone()).await.unwrap();
+                        
+                        if status != self.status {
+                            self.update_status(status.clone()).await.unwrap();
+                        }
 
                         match status {
                             TransferStatus::Done => {
@@ -272,10 +273,18 @@ impl<D: KeyValueDB> ScheduledTask<D> {
         status: TransferStatus,
     ) -> Result<(), CustodyServiceError> {
         tracing::info!("update status initiated");
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         let job_status_info = JobShortInfo {
             status: status.clone(),
             tx_hash: self.tx_hash.clone(),
             failure_reason: self.failure_reason.clone(),
+            amount: self.amount.to_string(),
+            to: self.to.clone(),
+            timestamp,
         };
 
         let tx = {
@@ -298,10 +307,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                 endpoint,
                 job_status_info,
                 retries_left: 42,
-                timestamp: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
+                timestamp,
             };
 
             self.callback_sender

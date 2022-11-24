@@ -2,11 +2,23 @@ use crate::state::State;
 
 use ethabi::ethereum_types::{H256, U64};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug};
+use std::fmt::Debug;
 
 use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}};
 
 use super::{tx_parser::DecMemo, scheduled_task::TransferStatus};
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct JobShortInfo {
+    pub status: TransferStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tx_hash: Option<String>,
+    pub amount: String,
+    pub to: String,
+    pub timestamp: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+}
 
 #[derive(Serialize)]
 pub struct AccountShortInfo {

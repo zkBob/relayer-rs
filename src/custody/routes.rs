@@ -21,10 +21,10 @@ use crate::{
 
 use super::{
     errors::CustodyServiceError,
-    service::{CustodyService, JobShortInfo, JobStatusCallback, CustodyDbColumn},
+    service::{CustodyService, JobStatusCallback, CustodyDbColumn},
     types::{
         AccountInfoRequest, GenerateAddressResponse, SignupRequest,
-        SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest,
+        SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest, JobShortInfo,
     }, scheduled_task::ScheduledTask,
 };
 
