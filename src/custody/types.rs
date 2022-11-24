@@ -15,10 +15,12 @@ use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolPar
 use super::{service::{TransferStatus, JobStatusCallback}, tx_parser::DecMemo};
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountShortInfo {
     pub id: String,
     pub description: String,
     pub balance: String,
+    pub single_tx_limit: String
 }
 
 #[derive(Serialize)]
