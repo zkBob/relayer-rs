@@ -505,7 +505,8 @@ impl CustodyService {
 
     pub fn task_keys(&self, request_id: &str) -> Result<Vec<Vec<u8>>, CustodyServiceError> {
         let count = self.db.get(CustodyDbColumn::TxRequestIndex.into(), request_id.as_bytes())
-            .map_err(|_| CustodyServiceError::DataBaseReadError)?.unwrap();
+            .map_err(|_| CustodyServiceError::DataBaseReadError)?
+            .ok_or(CustodyServiceError::TransactionNotFound)?;
         let count: u32 = u32::from_be_bytes(count.try_into().unwrap());
         Ok((0..count).map(|index| [request_id.as_bytes(), &index.to_be_bytes()].concat()).collect::<Vec<_>>())
     }

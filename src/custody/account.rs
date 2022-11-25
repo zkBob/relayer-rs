@@ -56,6 +56,8 @@ pub struct Account {
     pub id: Uuid,
     pub description: String,
     pub history: kvdb_rocksdb::Database,
+
+    last_task_key: RwLock<Option<Vec<u8>>>
 }
 
 impl Account {
@@ -296,6 +298,7 @@ impl Account {
                 &data_file_path(base_path, id, DataType::History),
             )
             .unwrap(),
+            last_task_key: RwLock::new(None)
         }
     }
 
@@ -346,7 +349,18 @@ impl Account {
                 &data_file_path(base_path, id, DataType::History),
             )
             .unwrap(),
+            last_task_key: RwLock::new(None)
         })
+    }
+
+    pub async fn update_last_task(&self, task_key: Vec<u8>) {
+        let mut last_task = self.last_task_key.write().await;
+        *last_task = Some(task_key);
+    }
+
+    pub async fn last_task(&self) -> Option<Vec<u8>> {
+        let last_task_key = self.last_task_key.read().await;
+        last_task_key.clone()
     }
 
     async fn block_timestamp(&self, pool: &Pool, block_number: U64) -> U256 {

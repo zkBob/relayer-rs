@@ -143,11 +143,33 @@ pub async fn transfer<D: KeyValueDB>(
     }
 
     let account = custody.account(account_id)?;
+    let last_account_task = account.last_task().await;
+    if let Some(task_key) = last_account_task {
+        let job = custody
+            .db
+            .get(
+                CustodyDbColumn::JobsIndex.into(),
+                &task_key,
+            )
+            .map_err(|_| CustodyServiceError::DataBaseReadError)?
+            .ok_or(CustodyServiceError::TransactionNotFound)?;
+        
+        let job: JobShortInfo = serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+
+        match job.status {
+            TransferStatus::Done
+            | TransferStatus::Failed(_) => {}
+            _ => {
+                return Err(CustodyServiceError::AccountIsBusy)
+            }
+        }
+    }
 
     let fee: u64 = state.settings.web3.relayer_fee;
 
     let tx_parts = account.get_tx_parts(request.amount, fee, request.to.clone()).await?;
     for (i, (to, amount)) in tx_parts.iter().enumerate() {
+        let last_account_task = account.last_task().await;
         let mut task = ScheduledTask {
             request_id: request_id.clone(),
             task_index: i as u32,
@@ -168,10 +190,12 @@ pub async fn transfer<D: KeyValueDB>(
             to: to.clone(),
             custody: custody_clone.clone(),
             state: state.clone(),
+            depends_on: last_account_task,
         };
 
         let status = if i == 0 { TransferStatus::New } else { TransferStatus::Queued };
         task.update_status(status).await?;
+        account.update_last_task(task.task_key()).await;
         prover_sender.send(task).await.unwrap();
     }
 

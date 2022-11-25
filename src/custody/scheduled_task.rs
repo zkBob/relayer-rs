@@ -60,6 +60,7 @@ pub struct ScheduledTask<D:'static + KeyValueDB> {
     pub to: Option<String>,
     pub custody: Data<RwLock<CustodyService>>,
     pub state: Data<State<D>>,
+    pub depends_on: Option<Vec<u8>>
 }
 
 impl<D: KeyValueDB> Debug for ScheduledTask<D> {
@@ -182,10 +183,9 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                     // transaction has been mined, set tx_hash and status
                     //TODO: call webhook on_complete
                     Some(tx_hash) => {
-                        self.tx_hash = Some(tx_hash);
                         let status = TransferStatus::from(relayer_response.status);
-                        
-                        if status != self.status {
+                        if status != self.status || self.tx_hash != Some(tx_hash.clone()) {
+                            self.tx_hash = Some(tx_hash);
                             self.update_status(status.clone()).await.unwrap();
                         }
 
@@ -291,7 +291,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
             let mut tx = self.db.transaction();
             tx.put(
                 CustodyDbColumn::JobsIndex.into(),
-                &Self::task_key(&self.request_id, self.task_index),
+                &self.task_key(),
                 &serde_json::to_vec(&job_status_info).unwrap(),
             );
             tx
@@ -320,16 +320,14 @@ impl<D: KeyValueDB> ScheduledTask<D> {
     }
 
     pub async fn prepare_task(&mut self) -> Result<TransferStatus, CustodyServiceError> {
-        let index = self.task_index;
-            
         let previous_status = {
-            if index == 0 {
+            if self.depends_on.is_none() {
                 // first task is always ready
                 TransferStatus::Done
             } else {
                 let previous_job = self.db.get(
                     CustodyDbColumn::JobsIndex.into(), 
-                    &Self::task_key(&self.request_id, index - 1)
+                    &self.depends_on.clone().unwrap()
                 )
                 .map_err(|_| CustodyServiceError::DataBaseReadError)?.unwrap();
     
@@ -340,6 +338,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
 
         match previous_status {
             TransferStatus::Done => {
+                // TODO: replace this with optimistic state
                 self.state.sync().await.unwrap();
 
                 let tx = {
@@ -363,27 +362,33 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                     };
                     let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], tx_outputs);
 
-                    account
-                        .create_tx(transfer, None, None)
-                        .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))?
+                    account.create_tx(transfer, None, None)
+                        .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))
                 };
 
-                self.tx = Some(tx);
-                self.update_status(TransferStatus::Proving).await?;
-                Ok(TransferStatus::Proving)
+                match tx {
+                    Ok(tx) => {
+                        self.tx = Some(tx);
+                        self.update_status(TransferStatus::Proving).await?;
+                        Ok(TransferStatus::Proving)
+                    },
+                    Err(err) => {
+                        self.update_status(TransferStatus::Failed(err.clone())).await?;
+                        Ok(TransferStatus::Failed(err))
+                    }
+                }
             }
             TransferStatus::Failed(_) => {
                 self.update_status(TransferStatus::Failed(CustodyServiceError::PreviousTxFailed)).await?;
                 Ok(TransferStatus::Failed(CustodyServiceError::PreviousTxFailed))
             }
             _ => {
-                //self.update_status(TransferStatus::Queued).await?;
                 Ok(TransferStatus::Queued)
             }
         }
     }
 
-    fn task_key(request_id: &str, task_index: u32) -> Vec<u8> {
-        [request_id.as_bytes(), &task_index.to_be_bytes()].concat()
+    pub fn task_key(&self) -> Vec<u8> {
+        [self.request_id.as_bytes(), &self.task_index.to_be_bytes()].concat()
     }
 }
