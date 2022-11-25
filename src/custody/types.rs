@@ -14,7 +14,7 @@ use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolPar
 
 use super::{service::{TransferStatus, JobStatusCallback}, tx_parser::DecMemo};
 
-#[derive(Serialize)]
+#[derive(Serialize,Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountShortInfo {
     pub id: String,
@@ -79,7 +79,7 @@ pub struct AccountInfoRequest {
     pub id: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize,Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferRequest {
     pub request_id: Option<String>,
@@ -129,13 +129,13 @@ impl Debug for ScheduledTask {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateAddressResponse {
     pub address: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignupResponse {
     pub account_id: String,
@@ -177,7 +177,7 @@ pub struct HistoryRecord {
     pub block_num: U64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferResponse {
     pub request_id: String,
@@ -189,7 +189,7 @@ pub struct TransferStatusRequest {
     pub request_id: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionStatusResponse {
     pub status: TransferStatus,

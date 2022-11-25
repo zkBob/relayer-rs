@@ -22,13 +22,16 @@ use libzeropool::{
 };
 use memo_parser::memo::TxType as MemoTxType;
 use serde::{Deserialize, Serialize};
-use tracing_futures::Instrument;
 use std::{
     fs, thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
-    u64
+    u64,
 };
-use tokio::sync::{mpsc::{Receiver, Sender}, RwLock};
+use tokio::sync::{
+    mpsc::{Receiver, Sender},
+    RwLock,
+};
+use tracing_futures::Instrument;
 use uuid::Uuid;
 
 use super::{
@@ -170,15 +173,24 @@ pub fn start_prover(
 ) {
     tokio::task::spawn(async move {
         while let Some(mut task) = prover_receiver.recv().await {
-            match task.make_proof_and_send_to_relayer().await {
-                Ok(_) => {
-                    status_sender.send(task).await.unwrap();
-                }
-                Err(e) => {
-                    tracing::error!("error from prover: {:#?}", &e);
-                    task.update_status(TransferStatus::Failed(e)).await.unwrap();
-                }
-            }
+            let status_sender = status_sender.clone();
+            thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    match task
+                    .make_proof_and_send_to_relayer()
+                    .instrument(tracing::debug_span!("make_proof_and_send_to_relayer"))
+                    .await {
+                        Ok(_) => {
+                            status_sender.send(task).await.unwrap();
+                        }
+                        Err(e) => {
+                            tracing::error!("error from prover: {:#?}", &e);
+                            task.update_status(TransferStatus::Failed(e)).await.unwrap();
+                        }
+                    }
+                });
+            });
         }
     });
 }
@@ -655,7 +667,7 @@ impl ScheduledTask {
             // let account_id = Uuid::from_str(&request.account_id).unwrap();
 
             let proving_span = tracing::info_span!("proving", request_id = request_id.clone());
-        
+
             let (inputs, proof) = proving_span.in_scope(|| {
                 prove_tx(
                     &self.params,

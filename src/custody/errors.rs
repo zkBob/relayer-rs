@@ -44,7 +44,7 @@ impl ResponseError for CustodyServiceError {
             | CustodyServiceError::DuplicateTransactionId
             | CustodyServiceError::BadRequest(_)
             | CustodyServiceError::IncorrectAccountId
-            | CustodyServiceError::AccountNotFound => StatusCode::BAD_REQUEST,
+            | CustodyServiceError::AccountNotFound => StatusCode::NOT_FOUND,
             CustodyServiceError::AccessDenied => StatusCode::UNAUTHORIZED,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }

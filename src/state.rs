@@ -77,8 +77,13 @@ impl<D: 'static + KeyValueDB> State<D> {
             let (contract_index, contract_root) = pool.root().await?;
             let local_finalized_root = finalized.get_root();
             let local_finalized_index = finalized.next_index();
-            tracing::info!("local root {}", local_finalized_root.to_string());
-            tracing::info!("contract root {}", contract_root.to_string());
+            tracing::debug!(
+                "starting sync:\nlocal root {}, local_finalized_index {}\ncontract root {}, contract_index {}",
+                    local_finalized_root.to_string(),
+                    local_finalized_index,
+                    contract_root.to_string(),
+                    contract_index
+            );
 
             if !local_finalized_root.eq(&contract_root) {
                 let missing_indices: Vec<u64> = (local_finalized_index..contract_index.as_u64())

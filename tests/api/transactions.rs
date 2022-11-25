@@ -1,16 +1,157 @@
+use std::time::Duration;
+
 use crate::helpers::spawn_app;
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
 use libzeropool::constants::OUT;
 use libzeropool::fawkes_crypto::ff_uint::Num;
 use relayer_rs::{
-    state::{JobsDbColumn},
-    tx_checker::check_tx, types::{transaction_request::TransactionRequest, job::{Job, JobStatus}},
+    custody::types::{
+        AccountShortInfo, GenerateAddressResponse, SignupResponse, TransactionStatusResponse,
+        TransferRequest, TransferResponse,
+    },
+    state::JobsDbColumn,
+    tx_checker::check_tx,
+    types::{
+        job::{Job, JobStatus},
+        transaction_request::TransactionRequest,
+    }, configuration::TelemetryKind,
 };
+use tokio::time::sleep;
 
 use serde_json::{json, Value};
 use web3::types::BlockNumber;
 use wiremock::matchers::{body_string_contains, method};
 use wiremock::{Mock, ResponseTemplate};
+
+#[test]
+fn test_target() {
+
+    let a: TelemetryKind = TelemetryKind::from("jaeger".to_string());
+
+    println!("a = {:#?}",a );
+
+}
+
+#[actix_rt::test]
+async fn load_transfers() {
+    let client = reqwest::Client::new();
+
+    let base_account = std::env::var("BASE_ACCOUNT").unwrap();
+
+    let mut accounts: Vec<(String, String)> = vec![];
+
+    for _ in 1..5 {
+        let signup_response: SignupResponse = client
+            .post("http://localhost:8001/signup")
+            .header("Authorization", "Bearer 1337")
+            .json(&json!( {
+                "description":"foobar"
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        let account_id = signup_response.account_id;
+
+        println!("signup returned account {}", &account_id);
+
+        let gen_address: GenerateAddressResponse = client
+            .get("http://localhost:8001/generateAddress")
+            .query(&[("id", &account_id)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        println!("gen address returned address {}", &gen_address.address);
+
+        accounts.push((account_id.clone(), gen_address.address.clone()));
+
+        let transfer_response = client
+            .post("http://localhost:8001/transfer")
+            .json(
+                &serde_json::to_value(TransferRequest {
+                    account_id: base_account.to_string().clone(),
+                    to: gen_address.address,
+                    amount: 101000000 as u64,
+                    webhook: None,
+                    request_id: None,
+                })
+                .unwrap(),
+            )
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+        
+
+        let transfer_response: TransferResponse = transfer_response
+            .json()
+            .await
+            .unwrap();
+        let request_id = transfer_response.request_id;
+
+        println!("initiated transfer {}", &request_id);
+
+        println!("waiting for transfers to finish");
+        sleep(Duration::from_secs(60)).await;
+
+        let status: TransactionStatusResponse = client
+            .get("http://localhost:8001/transactionStatus")
+            .query(&[("requestId", &request_id)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        println!("got status: {:?}", status.status);
+
+        let account_info: AccountShortInfo = client
+            .get("http://localhost:8001/account")
+            .query(&[("id", &account_id)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        println!("account balance: {}", account_info.balance);
+        println!("**************************************************************");
+    }
+
+    for (account_id, address) in accounts {
+        let transfer_response: String = client
+            .post("http://localhost:8001/transfer")
+            .json(
+                &serde_json::to_value(TransferRequest {
+                    account_id,
+                    to: address,
+                    amount: 1000000 as u64,
+                    webhook: None,
+                    request_id: None,
+                })
+                .unwrap(),
+            )
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        // let request_id = transfer_response.request_id;
+
+        println!("initiated transfer response {}", &transfer_response);
+    }
+}
 
 #[actix_rt::test]
 async fn get_transactions_works() {
