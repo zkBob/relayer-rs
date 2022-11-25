@@ -14,6 +14,7 @@ pub struct JobShortInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
     pub amount: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     pub timestamp: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -54,18 +55,6 @@ pub type Fs = <PoolParams as PoolParamsTrait>::Fs;
 
 pub type RelayerState<D> = State<D>;
 
-// #[derive(Serialize)]
-// struct TransactionData {
-//     public: TransferPub<Fr>,
-//     secret: TransferSec<Fr>,
-//     #[serde(with = "hex")]
-//     ciphertext: Vec<u8>,
-//     // #[serde(with = "hex")]
-//     memo: Vec<u8>,
-//     commitment_root: Num<Fr>,
-//     out_hashes: SizedVec<Num<Fr>, { constants::OUT + 1 }>,
-//     parsed_delta: ParsedDelta,
-// }
 #[derive(Serialize)]
 struct ParsedDelta {
     v: i64,
@@ -119,6 +108,7 @@ pub enum HistoryTxType {
     TransferIn,
     TransferOut,
     ReturnedChange,
+    AggregateNotes,
 }
 
 #[derive(Serialize)]

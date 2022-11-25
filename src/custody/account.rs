@@ -12,6 +12,7 @@ use libzkbob_rs::{
     merkle::MerkleTree,
     sparse_array::SparseArray,
 };
+use libzeropool::native::account::Account as NativeAccount;
 use memo_parser::memo::TxType;
 use memo_parser::memoparser;
 use tokio::sync::RwLock;
@@ -67,7 +68,7 @@ impl Account {
         let mut parts = vec![];
         
         let notes = account.state.get_usable_notes();
-        let mut valid = false;
+        let mut balance_is_sufficient = false;
         for notes in notes.chunks(3) {
             let mut note_balance = Num::ZERO;
             for (_, note) in notes {
@@ -76,15 +77,15 @@ impl Account {
 
             if (note_balance + account_balance).to_uint() >= (amount + fee).to_uint() {
                 parts.push((Some(to), amount));
-                valid = true;
+                balance_is_sufficient = true;
                 break;
             } else {
-                parts.push((None, note_balance + account_balance - fee));
+                parts.push((None, note_balance - fee));
                 account_balance += note_balance - fee;
             }
         }
 
-        if !valid {
+        if !balance_is_sufficient {
             return Err(CustodyServiceError::InsufficientBalance);
         }
 
@@ -143,6 +144,7 @@ impl Account {
         F: Fn(Vec<u8>) -> Result<String, String>,
     {
         let mut history = vec![];
+        let mut last_account: Option<NativeAccount<Fr>> = None;
         for (_, value) in self.history.iter(HistoryDbColumn::NotesIndex.into()) {
             let tx: HistoryRecord = serde_json::from_slice(&value).unwrap();
             let calldata = memoparser::parse_calldata(&tx.calldata, None).unwrap();
@@ -163,6 +165,23 @@ impl Account {
                 )],
                 TxType::Transfer => {
                     let mut history_records = vec![];
+                    
+                    if dec_memo.in_notes.len() == 0 && dec_memo.out_notes.len() == 0 {
+                        let amount = {
+                            let previous_amount = match last_account {
+                                Some(acc) => acc.b.as_num().clone(),
+                                None => Num::ZERO,
+                            };
+                            dec_memo.acc.unwrap().b.as_num() - previous_amount
+                        };
+                        
+                        history_records.push((
+                            HistoryTxType::AggregateNotes,
+                            amount.to_string(),
+                            None
+                        ))
+                    }
+                    
                     for note in dec_memo.in_notes.iter() {
                         let loopback = dec_memo.out_notes
                             .iter()
@@ -213,6 +232,10 @@ impl Account {
                     to,
                     transaction_id: transaction_id.clone(),
                 })
+            }
+
+            if let Some(acc) = dec_memo.acc {
+                last_account = Some(acc);
             }
         }
         history
