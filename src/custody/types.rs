@@ -138,6 +138,12 @@ pub struct TransferResponse {
     pub request_id: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalculateFeeResponse {
+    pub transaction_count: u64,
+    pub total_fee: u64
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferStatusRequest {

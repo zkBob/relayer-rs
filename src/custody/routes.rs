@@ -16,15 +16,16 @@ use uuid::Uuid;
 use crate::{
     custody::{types::TransferResponse, scheduled_task::TransferStatus},
     routes::job::JobResponse,
-    state::State
+    state::State,
 };
 
 use super::{
     errors::CustodyServiceError,
     service::{CustodyService, JobStatusCallback, CustodyDbColumn},
     types::{
-        AccountInfoRequest, GenerateAddressResponse, SignupRequest,
-        SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest, JobShortInfo,
+        AccountInfoRequest, CalculateFeeResponse, GenerateAddressResponse, JobShortInfo,
+        SignupRequest, SignupResponse, TransactionStatusResponse, TransferRequest,
+        TransferStatusRequest,
     }, scheduled_task::ScheduledTask,
 };
 
@@ -50,6 +51,41 @@ pub async fn account_info<D: KeyValueDB>(
         .ok_or(CustodyServiceError::AccountNotFound)?;
 
     Ok(HttpResponse::Ok().json(account_info))
+}
+
+pub async fn calculate_fee<D: KeyValueDB>(
+    request: Json<TransferRequest>,
+    state: Data<State<D>>,
+    custody: Custody,
+) -> Result<HttpResponse, CustodyServiceError> {
+    let request: TransferRequest = request.0.into();
+
+    let account_id = Uuid::from_str(&request.account_id).map_err(|err| {
+        tracing::error!("failed to parse account id: {}", err);
+        CustodyServiceError::IncorrectAccountId
+    })?;
+
+    let custody = custody.read().await;    
+    custody.sync_account(account_id, &state).await?;
+
+    let account = custody.account(account_id)?;
+
+    let fee = state.settings.web3.relayer_fee;
+
+    let tx_parts = account
+        .get_tx_parts(request.amount, fee, request.to)
+        .await?;
+
+    let transaction_count: u64 = tx_parts.len() as u64;
+
+    let total_fee = fee * transaction_count;
+
+    Ok(HttpResponse::Ok()
+        .json(&CalculateFeeResponse {
+            transaction_count,
+            total_fee,
+        })
+        )
 }
 
 pub async fn signup<D: KeyValueDB>(
@@ -97,7 +133,7 @@ pub async fn transfer<D: KeyValueDB>(
     let custody = custody.read().await;
     let relayer_url = custody.settings.relayer_url.clone();
     custody.sync_account(account_id, &state).await?;
-    
+
     let request_id = request
         .request_id
         .clone()
@@ -108,8 +144,7 @@ pub async fn transfer<D: KeyValueDB>(
 
     let account = custody.account(account_id)?;
 
-    // TODO: config
-    let fee: u64 = 100000000;
+    let fee: u64 = state.settings.web3.relayer_fee;
 
     let tx_parts = account.get_tx_parts(request.amount, fee, request.to.clone()).await?;
     for (i, (to, amount)) in tx_parts.iter().enumerate() {
@@ -134,7 +169,7 @@ pub async fn transfer<D: KeyValueDB>(
             custody: custody_clone.clone(),
             state: state.clone(),
         };
-    
+
         let status = if i == 0 { TransferStatus::New } else { TransferStatus::Queued };
         task.update_status(status).await?;
         prover_sender.send(task).await.unwrap();
