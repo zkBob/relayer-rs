@@ -58,39 +58,37 @@ pub struct Account {
 }
 
 impl Account {
-    pub async fn get_txs_amounts(&self, total_amount: u64, fee: u64) -> Result<Vec<Num<Fr>>, CustodyServiceError> {
+    pub async fn get_tx_parts(&self, total_amount: u64, fee: u64, to: String) -> Result<Vec<(Option<String>, Num<Fr>)>, CustodyServiceError> {
         let account = self.inner.read().await;
-        let mut remaining_amount = Num::from_uint(NumRepr::from(total_amount)).unwrap();
+        let amount = Num::from_uint(NumRepr::from(total_amount)).unwrap();
         let fee = Num::from_uint(NumRepr::from(fee)).unwrap();
 
         let mut account_balance = account.state.account_balance();
-        let mut amounts = vec![];
+        let mut parts = vec![];
         
         let notes = account.state.get_usable_notes();
+        let mut valid = false;
         for notes in notes.chunks(3) {
             let mut note_balance = Num::ZERO;
             for (_, note) in notes {
                 note_balance += note.b.as_num();
             }
 
-            if (note_balance + account_balance).to_uint() >= (remaining_amount + fee).to_uint() {
-                amounts.push(remaining_amount);
-                remaining_amount = Num::ZERO;
+            if (note_balance + account_balance).to_uint() >= (amount + fee).to_uint() {
+                parts.push((Some(to), amount));
+                valid = true;
                 break;
             } else {
-                amounts.push(note_balance + account_balance - fee);
-                remaining_amount -= note_balance + account_balance - fee;
+                parts.push((None, note_balance + account_balance - fee));
+                account_balance += note_balance - fee;
             }
-
-            account_balance = Num::ZERO;
         }
 
-        let zero: Num<Fr> = Num::ZERO;
-        if remaining_amount.to_uint() > zero.to_uint() {
+        if !valid {
             return Err(CustodyServiceError::InsufficientBalance);
         }
 
-        Ok(amounts)
+        Ok(parts)
     }
 
     pub async fn short_info(&self) -> AccountShortInfo {

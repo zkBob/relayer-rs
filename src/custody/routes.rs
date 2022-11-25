@@ -111,8 +111,8 @@ pub async fn transfer<D: KeyValueDB>(
     // TODO: config
     let fee: u64 = 100000000;
 
-    let txs_amounts = account.get_txs_amounts(request.amount, fee).await?;
-    for (i, amount) in txs_amounts.iter().enumerate() {
+    let tx_parts = account.get_tx_parts(request.amount, fee, request.to.clone()).await?;
+    for (i, (to, amount)) in tx_parts.iter().enumerate() {
         let mut task = ScheduledTask {
             request_id: request_id.clone(),
             task_index: i as u32,
@@ -130,7 +130,7 @@ pub async fn transfer<D: KeyValueDB>(
             callback_address: request.webhook.clone(),
             callback_sender: callback_sender.clone(),
             amount: amount.clone(),
-            to: request.to.clone(),
+            to: to.clone(),
             custody: custody_clone.clone(),
             state: state.clone(),
         };
@@ -140,7 +140,7 @@ pub async fn transfer<D: KeyValueDB>(
         prover_sender.send(task).await.unwrap();
     }
 
-    custody.save_tasks_count(&request_id, txs_amounts.len() as u32)?;
+    custody.save_tasks_count(&request_id, tx_parts.len() as u32)?;
 
     tracing::info!(
         "{} request received & saved, tx created and sent to the prover queue",

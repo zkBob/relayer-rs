@@ -14,7 +14,7 @@ pub struct JobShortInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
     pub amount: String,
-    pub to: String,
+    pub to: Option<String>,
     pub timestamp: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,

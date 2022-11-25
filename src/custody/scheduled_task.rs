@@ -57,7 +57,7 @@ pub struct ScheduledTask<D:'static + KeyValueDB> {
     pub callback_sender: Data<Sender<JobStatusCallback>>,
     
     pub amount: Num<Fr>,
-    pub to: String,
+    pub to: Option<String>,
     pub custody: Data<RwLock<CustodyService>>,
     pub state: Data<State<D>>,
 }
@@ -352,11 +352,16 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                     let fee: u64 = 100000000;
                     let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
 
-                    let tx_output: TxOutput<Fr> = TxOutput {
-                        to: self.to.clone(),
-                        amount: TokenAmount::new(self.amount),
+                    let tx_outputs = match &self.to {
+                        Some(to) => {
+                            vec![TxOutput {
+                                to: to.clone(),
+                                amount: TokenAmount::new(self.amount),
+                            }]
+                        },
+                        None => vec![],
                     };
-                    let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], vec![tx_output]);
+                    let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], tx_outputs);
 
                     account
                         .create_tx(transfer, None, None)
