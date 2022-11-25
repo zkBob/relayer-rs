@@ -21,7 +21,7 @@ pub struct JobShortInfo {
     pub failure_reason: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct AccountShortInfo {
     pub id: String,
     pub description: String,
@@ -72,7 +72,7 @@ pub struct AccountInfoRequest {
     pub id: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize,Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferRequest {
     pub request_id: Option<String>,
@@ -83,13 +83,13 @@ pub struct TransferRequest {
     pub webhook: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateAddressResponse {
     pub address: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignupResponse {
     pub account_id: String,
@@ -132,7 +132,7 @@ pub struct HistoryRecord {
     pub block_num: U64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferResponse {
     pub request_id: String,
@@ -144,13 +144,13 @@ pub struct CalculateFeeResponse {
     pub transaction_count: u64,
     pub total_fee: u64
 }
-#[derive(Deserialize)]
+#[derive(Deserialize,Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferStatusRequest {
     pub request_id: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionStatusResponse {
     pub status: TransferStatus,
@@ -160,7 +160,7 @@ pub struct TransactionStatusResponse {
     pub failure_reason: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustodyTransactionStatusResponse {
     pub status: TransferStatus,

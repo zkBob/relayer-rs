@@ -139,15 +139,24 @@ pub fn start_prover<D: KeyValueDB>(
                 _ => unreachable!(),
             };
 
-            match task.make_proof_and_send_to_relayer().await {
-                Ok(_) => {
-                    status_sender.send(task).await.unwrap();
-                }
-                Err(e) => {
-                    tracing::error!("error from prover: {:#?}", &e);
-                    task.update_status(TransferStatus::Failed(e)).await.unwrap();
-                }
-            }
+            let status_sender = status_sender.clone();
+            thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    match task
+                    .make_proof_and_send_to_relayer()
+                    .instrument(tracing::debug_span!("make_proof_and_send_to_relayer"))
+                    .await {
+                        Ok(_) => {
+                            status_sender.send(task).await.unwrap();
+                        }
+                        Err(e) => {
+                            tracing::error!("error from prover: {:#?}", &e);
+                            task.update_status(TransferStatus::Failed(e)).await.unwrap();
+                        }
+                    }
+                });
+            });
         }
     });
 }
