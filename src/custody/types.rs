@@ -9,8 +9,8 @@ use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolPar
 use super::{tx_parser::DecMemo, scheduled_task::TransferStatus};
 
 
-#[serde(rename_all = "camelCase")]
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct JobShortInfo {
     pub status: TransferStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
