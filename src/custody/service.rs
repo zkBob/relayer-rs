@@ -475,7 +475,7 @@ impl CustodyService {
     }
 
     pub fn has_request_id(&self, request_id: &str) -> Result<bool, CustodyServiceError> {
-        self.db.has_key(CustodyDbColumn::JobsIndex.into(), request_id.as_bytes())
+        self.db.has_key(CustodyDbColumn::TxRequestIndex.into(), request_id.as_bytes())
             .map_err(|err| {
                 tracing::error!("failed to get job id from database: {}", err);
                 CustodyServiceError::DataBaseReadError

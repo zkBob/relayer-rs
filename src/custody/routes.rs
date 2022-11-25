@@ -24,7 +24,7 @@ use super::{
     service::{CustodyService, JobStatusCallback, CustodyDbColumn},
     types::{
         AccountInfoRequest, GenerateAddressResponse, SignupRequest,
-        SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest, JobShortInfo,
+        SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest, JobShortInfo, CustodyTransactionStatusResponse,
     }, scheduled_task::ScheduledTask,
 };
 
@@ -206,7 +206,7 @@ pub async fn transaction_status<D: KeyValueDB>(
         jobs.push(job);
     }
 
-    Ok(HttpResponse::Ok().json(jobs))
+    Ok(HttpResponse::Ok().json(CustodyTransactionStatusResponse::from(jobs)))
 }
 
 pub async fn generate_shielded_address<D: KeyValueDB>(

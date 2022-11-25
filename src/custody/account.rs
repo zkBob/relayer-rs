@@ -66,6 +66,11 @@ impl Account {
 
         let mut account_balance = account.state.account_balance();
         let mut parts = vec![];
+
+        if account_balance.to_uint() >= (amount + fee).to_uint() {
+            parts.push((Some(to), amount));
+            return Ok(parts)
+        }
         
         let notes = account.state.get_usable_notes();
         let mut balance_is_sufficient = false;

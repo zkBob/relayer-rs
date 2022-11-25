@@ -153,3 +153,74 @@ pub struct TransactionStatusResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustodyTransactionStatusResponse {
+    pub status: TransferStatus,
+    pub timestamp: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tx_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linked_tx_hashes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+}
+
+impl From<Vec<JobShortInfo>> for CustodyTransactionStatusResponse {
+    fn from(jobs: Vec<JobShortInfo>) -> Self {
+        let mut tx_hashes = jobs
+            .iter()
+            .filter(|job| job.tx_hash.is_some())
+            .map(|job| job.tx_hash.clone().unwrap())
+            .collect::<Vec<_>>();
+
+        let tx_hash = tx_hashes.pop();
+        let linked_tx_hashes = if tx_hash.is_some() {
+            Some(tx_hashes)
+        } else {
+            None
+        };
+
+        let (status, timestamp, failure_reason) = {
+            let last_job = jobs.last().unwrap();
+            match last_job.status {
+                TransferStatus::Done => (TransferStatus::Done, last_job.timestamp, None),
+                TransferStatus::Failed(_) => {
+                    let first_failed_job = jobs
+                        .iter()
+                        .filter(|job| {
+                            match job.status {
+                                TransferStatus::Failed(_) => true,
+                                _ => false
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .first()
+                        .unwrap()
+                        .clone();
+
+                    (first_failed_job.status.clone(), first_failed_job.timestamp, first_failed_job.failure_reason.clone())
+                },
+                _ => {
+                    let relevant_job = jobs
+                        .iter()
+                        .filter(|job| {
+                            job.status != TransferStatus::Queued
+                        })
+                        .last()
+                        .unwrap();
+                    (TransferStatus::Relaying, relevant_job.timestamp, None)
+                }
+            }
+        };
+
+        CustodyTransactionStatusResponse {
+            status,
+            timestamp,
+            tx_hash,
+            linked_tx_hashes,
+            failure_reason,
+        }
+    }
+}
