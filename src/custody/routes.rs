@@ -25,7 +25,7 @@ use super::{
     types::{
         AccountInfoRequest, CalculateFeeResponse, GenerateAddressResponse, JobShortInfo,
         SignupRequest, SignupResponse, TransactionStatusResponse, TransferRequest,
-        TransferStatusRequest, CustodyTransactionStatusResponse, CustodyHistoryRecord,
+        TransferStatusRequest, CustodyTransactionStatusResponse, CustodyHistoryRecord, CalculateFeeRequest,
     }, scheduled_task::ScheduledTask,
 };
 
@@ -54,11 +54,11 @@ pub async fn account_info<D: KeyValueDB>(
 }
 
 pub async fn calculate_fee<D: KeyValueDB>(
-    request: Json<TransferRequest>,
+    request: Json<CalculateFeeRequest>,
     state: Data<State<D>>,
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
-    let request: TransferRequest = request.0.into();
+    let request: CalculateFeeRequest = request.0.into();
 
     let account_id = Uuid::from_str(&request.account_id).map_err(|err| {
         tracing::error!("failed to parse account id: {}", err);
@@ -73,7 +73,7 @@ pub async fn calculate_fee<D: KeyValueDB>(
     let fee = state.settings.web3.relayer_fee;
 
     let tx_parts = account
-        .get_tx_parts(request.amount, fee, request.to)
+        .get_tx_parts(request.amount, fee, String::default())
         .await?;
 
     let transaction_count: u64 = tx_parts.len() as u64;

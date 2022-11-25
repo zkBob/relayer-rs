@@ -289,3 +289,10 @@ impl CustodyHistoryRecord {
             .collect::<Vec<_>>()
     }
 }
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CalculateFeeRequest {
+    pub account_id: String,
+    pub amount: u64,
+}
