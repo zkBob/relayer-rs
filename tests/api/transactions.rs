@@ -79,13 +79,13 @@ async fn gen_tx_and_send() {
             .has_key(0, request_id.as_hyphenated().to_string().as_bytes())
             .unwrap());
 
-        let pending = state.pending.lock().unwrap();
+        let pending = state.pending.lock().await;
         {
             let next_index = pending.next_index();
             assert_eq!(next_index, OUT as u64 + 1);
         }
 
-        let finalized = state.finalized.lock().unwrap();
+        let finalized = state.finalized.lock().await;
         {
             assert_eq!(finalized.next_index(), 0 as u64);
         }
@@ -115,7 +115,7 @@ async fn test_parse_fee_from_tx() {
 async fn test_check_pending_state_after_tx() {
     let test_app = spawn_app(true).await.unwrap();
     {
-        let pending_state = test_app.state.pending.lock().unwrap();
+        let pending_state = test_app.state.pending.lock().await;
         let root = pending_state.get_root();
         assert_eq!(
             root,
@@ -136,7 +136,7 @@ async fn test_check_pending_state_after_tx() {
         .await
         .expect("failed to make request");
     {
-        let pending_state = test_app.state.pending.lock().unwrap();
+        let pending_state = test_app.state.pending.lock().await;
         let root = pending_state.get_root();
         assert_eq!(
             root,
@@ -151,7 +151,7 @@ async fn test_check_pending_state_after_tx() {
 async fn test_check_pending_state_after_two_tx() {
     let test_app = spawn_app(true).await.unwrap();
     {
-        let pending_state = test_app.state.pending.lock().unwrap();
+        let pending_state = test_app.state.pending.lock().await;
         let root = pending_state.get_root();
         assert_eq!(
             root,
@@ -172,7 +172,7 @@ async fn test_check_pending_state_after_two_tx() {
         .await
         .expect("failed to make request");
     {
-        let pending_state = test_app.state.pending.lock().unwrap();
+        let pending_state = test_app.state.pending.lock().await;
         let root = pending_state.get_root();
         assert_eq!(
             root,
@@ -189,7 +189,7 @@ async fn test_check_pending_state_after_two_tx() {
         .await
         .expect("failed to make request");
     {
-        let pending_state = test_app.state.pending.lock().unwrap();
+        let pending_state = test_app.state.pending.lock().await;
         let root = pending_state.get_root();
         assert_eq!(
             root,
@@ -248,8 +248,8 @@ async fn test_finalize() {
 
     assert_eq!(updated_job.status, JobStatus::Done);
 
-    let finalized = state.finalized.lock().unwrap();
-    let pending = state.pending.lock().unwrap();
+    let finalized = state.finalized.lock().await;
+    let pending = state.pending.lock().await;
     assert_eq!(finalized.next_index(), pending.next_index());
 }
 
@@ -362,7 +362,7 @@ async fn test_rollback() {
 
     // Rollback finalized state manually to simulate a gap between pending and finalized state
     {
-        let mut finalized = app.state.finalized.lock().unwrap();
+        let mut finalized = app.state.finalized.lock().await;
 
         finalized.rollback(0 as u64);
     }
@@ -404,13 +404,13 @@ async fn test_rollback() {
     let last_job: Job = serde_json::from_slice(&last_job).unwrap();
 
     {
-        let pending = app.state.pending.lock().unwrap();
+        let pending = app.state.pending.lock().await;
 
         assert_eq!(pending.next_index(), 256 as u64, "wrong index after sync");
     }
 
     {
-        let finalized = app.state.finalized.lock().unwrap();
+        let finalized = app.state.finalized.lock().await;
 
         assert_eq!(
             finalized.next_index(),
@@ -450,13 +450,13 @@ async fn test_rollback() {
     }
 
     {
-        let pending = app.state.pending.lock().unwrap();
+        let pending = app.state.pending.lock().await;
 
         assert_eq!(pending.next_index(), 0 as u64);
     }
 
     {
-        let finalized = app.state.finalized.lock().unwrap();
+        let finalized = app.state.finalized.lock().await;
 
         assert_eq!(finalized.next_index(), 0 as u64);
     }
