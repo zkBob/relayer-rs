@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 use actix_web::web::Data;
 use kvdb_memorydb::InMemory;

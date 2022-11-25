@@ -51,7 +51,7 @@ pub async fn process_job<D: KeyValueDB>(
     pool: &Pool,
 ) {
     let tx_data = {
-        let mut pending = state.pending.lock().unwrap();
+        let mut pending = state.pending.lock().await;
         let tx_data = tx::build(&job, &pending, tree_params);
 
         job.index = pending.next_index();
@@ -123,8 +123,8 @@ pub async fn process_job<D: KeyValueDB>(
             state
                 .pending
                 .lock()
-                .unwrap()
-                .rollback(state.finalized.lock().unwrap().next_index());
+                .await
+                .rollback(state.finalized.lock().await.next_index());
         }
     }
 }

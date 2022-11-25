@@ -6,11 +6,10 @@ use relayer_rs::{
     telemetry::setup_telemetry,
 };
 use tracing::Instrument;
-use std::sync::Mutex;
 
 use libzeropool::POOL_PARAMS;
 use libzkbob_rs::merkle::MerkleTree;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
 use actix_web::web::Data;
 

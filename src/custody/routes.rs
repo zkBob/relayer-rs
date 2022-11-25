@@ -7,26 +7,26 @@ use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
 use libzeropool::fawkes_crypto::{
     backend::bellman_groth16::{engines::Bn256, Parameters},
-    ff_uint::{Num, NumRepr},
 };
-use libzkbob_rs::client::{TokenAmount, TransactionData, TxOutput, TxType};
+
 use std::str::FromStr;
 use tokio::sync::{mpsc::Sender, RwLock};
 use uuid::Uuid;
 
 use crate::{
-    custody::types::TransferResponse,
+    custody::{types::TransferResponse, scheduled_task::TransferStatus},
     routes::job::JobResponse,
-    state::State
+    state::State,
 };
 
 use super::{
     errors::CustodyServiceError,
-    service::{CustodyDbColumn, CustodyService, JobShortInfo, JobStatusCallback, TransferStatus},
+    service::{CustodyService, JobStatusCallback, CustodyDbColumn},
     types::{
-        AccountInfoRequest, Fr, GenerateAddressResponse, ScheduledTask, SignupRequest,
-        SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest,
-    },
+        AccountInfoRequest, CalculateFeeResponse, GenerateAddressResponse, JobShortInfo,
+        SignupRequest, SignupResponse, TransactionStatusResponse, TransferRequest,
+        TransferStatusRequest, CustodyTransactionStatusResponse, CustodyHistoryRecord, CalculateFeeRequest,
+    }, scheduled_task::ScheduledTask,
 };
 
 pub type Custody = Data<RwLock<CustodyService>>;
@@ -51,6 +51,41 @@ pub async fn account_info<D: KeyValueDB>(
         .ok_or(CustodyServiceError::AccountNotFound)?;
 
     Ok(HttpResponse::Ok().json(account_info))
+}
+
+pub async fn calculate_fee<D: KeyValueDB>(
+    request: Json<CalculateFeeRequest>,
+    state: Data<State<D>>,
+    custody: Custody,
+) -> Result<HttpResponse, CustodyServiceError> {
+    let request: CalculateFeeRequest = request.0.into();
+
+    let account_id = Uuid::from_str(&request.account_id).map_err(|err| {
+        tracing::error!("failed to parse account id: {}", err);
+        CustodyServiceError::IncorrectAccountId
+    })?;
+
+    let custody = custody.read().await;    
+    custody.sync_account(account_id, &state).await?;
+
+    let account = custody.account(account_id)?;
+
+    let fee = state.settings.web3.relayer_fee;
+
+    let tx_parts = account
+        .get_tx_parts(request.amount, fee, String::default())
+        .await?;
+
+    let transaction_count: u64 = tx_parts.len() as u64;
+
+    let total_fee = fee * transaction_count;
+
+    Ok(HttpResponse::Ok()
+        .json(&CalculateFeeResponse {
+            transaction_count,
+            total_fee,
+        })
+        )
 }
 
 pub async fn signup<D: KeyValueDB>(
@@ -84,7 +119,7 @@ pub async fn transfer<D: KeyValueDB>(
     custody: Custody,
     params: Data<Parameters<Bn256>>,
     custody_db: Data<Database>,
-    prover_sender: Data<Sender<ScheduledTask>>,
+    prover_sender: Data<Sender<ScheduledTask<D>>>,
     callback_sender: Data<Sender<JobStatusCallback>>,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let request: TransferRequest = request.0.into();
@@ -94,10 +129,11 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
+    let custody_clone = custody.clone();
     let custody = custody.read().await;
     let relayer_url = custody.settings.relayer_url.clone();
     custody.sync_account(account_id, &state).await?;
-    
+
     let request_id = request
         .request_id
         .clone()
@@ -107,47 +143,44 @@ pub async fn transfer<D: KeyValueDB>(
     }
 
     let account = custody.account(account_id)?;
-    let account = account.inner.read().await;
 
-    let fee = 100000000;
-    let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
+    let fee: u64 = state.settings.web3.relayer_fee;
 
-    let tx_output: TxOutput<Fr> = TxOutput {
-        to: request.to.clone(),
-        amount: TokenAmount::new(Num::from_uint(NumRepr::from(request.amount)).unwrap()),
-    };
-    let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], vec![tx_output]);
+    let tx_parts = account.get_tx_parts(request.amount, fee, request.to.clone()).await?;
+    for (i, (to, amount)) in tx_parts.iter().enumerate() {
+        let mut task = ScheduledTask {
+            request_id: request_id.clone(),
+            task_index: i as u32,
+            account_id,
+            job_id: None,
+            endpoint: None,
+            retries_left: 42,
+            status: TransferStatus::New,
+            tx_hash: None,
+            failure_reason: None,
+            relayer_url: relayer_url.clone(),
+            params: params.clone(),
+            db: custody_db.clone(),
+            tx: None,
+            callback_address: request.webhook.clone(),
+            callback_sender: callback_sender.clone(),
+            amount: amount.clone(),
+            to: to.clone(),
+            custody: custody_clone.clone(),
+            state: state.clone(),
+        };
 
-    let tx: TransactionData<Fr> = account
-        .create_tx(transfer, None, None)
-        .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))?;
+        let status = if i == 0 { TransferStatus::New } else { TransferStatus::Queued };
+        task.update_status(status).await?;
+        prover_sender.send(task).await.unwrap();
+    }
 
-    let db = custody_db.clone();
-
-    ScheduledTask::save_new(custody_db, request_id.clone())?;
+    custody.save_tasks_count(&request_id, tx_parts.len() as u32)?;
 
     tracing::info!(
         "{} request received & saved, tx created and sent to the prover queue",
         &request_id
     );
-    let task = ScheduledTask {
-        request_id: request_id.clone(),
-        account_id,
-        job_id: None,
-        endpoint: None,
-        retries_left: 42,
-        status: TransferStatus::Proving,
-        tx_hash: None,
-        failure_reason: None,
-        relayer_url,
-        params,
-        db,
-        tx,
-        callback_address: request.webhook, // custody,
-        callback_sender,
-    };
-
-    prover_sender.send(task).await.unwrap();
 
     Ok(HttpResponse::Ok().json(TransferResponse {
         request_id: request_id.clone(),
@@ -191,19 +224,24 @@ pub async fn transaction_status<D: KeyValueDB>(
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
 
-    let job = custody
-        .db
-        .get(
-            CustodyDbColumn::JobsIndex.into(),
-            &request.0.request_id.into_bytes(),
-        )
-        .map_err(|_| CustodyServiceError::DataBaseReadError)?
-        .ok_or(CustodyServiceError::TransactionNotFound)?;
+    let task_keys = custody.task_keys(&request.0.request_id)?;
+    let mut jobs = vec![];
+    for task_key in task_keys {
+        let job = custody
+            .db
+            .get(
+                CustodyDbColumn::JobsIndex.into(),
+                &task_key,
+            )
+            .map_err(|_| CustodyServiceError::DataBaseReadError)?
+            .ok_or(CustodyServiceError::TransactionNotFound)?;
 
-    let job: JobShortInfo =
-        serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+        let job: JobShortInfo =
+            serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+        jobs.push(job);
+    }
 
-    Ok(HttpResponse::Ok().json(job))
+    Ok(HttpResponse::Ok().json(CustodyTransactionStatusResponse::from(jobs)))
 }
 
 pub async fn generate_shielded_address<D: KeyValueDB>(
@@ -244,5 +282,5 @@ pub async fn history<D: KeyValueDB>(
         })
         .await;
 
-    Ok(HttpResponse::Ok().json(txs))
+    Ok(HttpResponse::Ok().json(CustodyHistoryRecord::convert_vec(txs)))
 }

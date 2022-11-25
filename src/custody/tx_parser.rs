@@ -14,7 +14,8 @@ pub type PoolParams = PoolBN256;
 pub type Fr = <PoolParams as PoolParamsTrait>::Fr;
 pub type Fs = <PoolParams as PoolParamsTrait>::Fs;
 use libzeropool::POOL_PARAMS;
-#[derive(Serialize, Deserialize, Clone)]
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct IndexedNote {
     pub index: u64,
     pub note: Note<Fr>,
@@ -39,7 +40,7 @@ pub struct StateUpdate {
     pub new_notes: Vec<Vec<(u64, Note<Fr>)>>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 pub struct DecMemo {
     pub index: u64,
     pub acc: Option<Account<Fr>>,

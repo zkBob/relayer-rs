@@ -1,7 +1,7 @@
 use crate::{
     configuration::Settings,
     contracts::Pool,
-    custody::{service::{CustodyService, start_prover, start_status_updater, JobStatusCallback, start_callback_sender}, types::ScheduledTask},
+    custody::{service::{CustodyService, start_prover, start_status_updater, JobStatusCallback, start_callback_sender}, scheduled_task::ScheduledTask},
     routes::routes,
     state::{State, DB},
     types::job::Job,
@@ -53,11 +53,11 @@ impl<D: 'static + KeyValueDB> Application<D> {
         let port = listener.local_addr().unwrap().port();
         let db = Data::new(CustodyService::get_db(&configuration.custody.db_path));
 
-        let (prover_sender, prover_receiver) = mpsc::channel::<ScheduledTask>(100);
-        let (status_updater_sender, status_updater_receiver) = mpsc::channel::<ScheduledTask>(100);
+        let (prover_sender, prover_receiver) = mpsc::channel::<ScheduledTask<D>>(100);
+        let (status_updater_sender, status_updater_receiver) = mpsc::channel::<ScheduledTask<D>>(100);
         let (callback_sender, callback_receiver) = mpsc::channel::<JobStatusCallback>(100);
 
-        start_prover(prover_receiver, status_updater_sender.clone());
+        start_prover(prover_receiver, prover_sender.clone(), status_updater_sender.clone());
 
         start_status_updater(status_updater_receiver, status_updater_sender);
 

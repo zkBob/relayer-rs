@@ -3,7 +3,7 @@ use actix_web::{http::header::ContentType, HttpResponse, ResponseError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Clone, Serialize, Deserialize, Debug, Error)]
+#[derive(Clone, Serialize, Deserialize, Debug, Error, PartialEq)]
 pub enum CustodyServiceError {
     #[error("request malformed or invalid: {0}")]
     BadRequest(String),
@@ -35,6 +35,10 @@ pub enum CustodyServiceError {
     RetryNeeded,
     #[error("access denied")]
     AccessDenied,
+    #[error("previous tx failed")]
+    PreviousTxFailed,
+    #[error("insufficient balance")]
+    InsufficientBalance,
 }
 
 impl ResponseError for CustodyServiceError {
