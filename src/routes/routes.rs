@@ -14,7 +14,7 @@ use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Param
 use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
-    custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status}, service::{CustodyService, JobStatusCallback}, scheduled_task::ScheduledTask},
+    custody::{routes::{account_info, list_accounts, signup, transfer, generate_shielded_address, history, transaction_status, calculate_fee}, service::{CustodyService, JobStatusCallback}, scheduled_task::ScheduledTask},
     routes::{self, wallet_screening},
     state::State,
 };
@@ -69,6 +69,7 @@ pub fn run<D: 'static + KeyValueDB>(
             .route("/account", web::get().to(account_info::<D>))
             .route("/accounts", web::get().to(list_accounts::<D>))
             .route("/transfer", web::post().to(transfer::<D>))
+            .route("/calculateFee", web::get().to(calculate_fee::<D>))
             .route("/transactionStatus", web::get().to(transaction_status::<D>))
             .route("/generateAddress", web::get().to(generate_shielded_address::<D>))
             .route("/history", web::get().to(history::<D>))
