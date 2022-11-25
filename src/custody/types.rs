@@ -101,7 +101,7 @@ pub struct ListAccountsResponse {
     pub accounts: Vec<AccountShortInfo>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, PartialEq, Clone)]
 pub enum HistoryTxType {
     Deposit,
     Withdrawal,
@@ -222,5 +222,64 @@ impl From<Vec<JobShortInfo>> for CustodyTransactionStatusResponse {
             linked_tx_hashes,
             failure_reason,
         }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustodyHistoryRecord {
+    pub tx_type: HistoryTxType,
+    pub tx_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linked_tx_hashes: Option<Vec<String>>,
+    pub timestamp: String,
+    pub amount: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_id: Option<String>,
+}
+
+impl CustodyHistoryRecord {
+    pub fn convert_vec(txs: Vec<HistoryTx>) -> Vec<Self> {
+        txs
+            .iter()
+            .filter(|tx| tx.tx_type != HistoryTxType::AggregateNotes)
+            .map(|tx| {
+                match tx.transaction_id.clone() {
+                    Some(request_id) => {
+                        let linked_tx_hashes = txs
+                            .iter()
+                            .filter(|tx| tx.transaction_id == Some(request_id.clone()))
+                            .filter(|tx| tx.tx_type == HistoryTxType::AggregateNotes)
+                            .map(|linked_tx| {
+                                linked_tx.tx_hash.clone()
+                            }).collect::<Vec<_>>();
+                        let linked_tx_hashes = if linked_tx_hashes.len() > 0 { Some(linked_tx_hashes) } else { None };
+                        
+                        CustodyHistoryRecord {
+                            tx_type: tx.tx_type.clone(),
+                            tx_hash: tx.tx_hash.clone(),
+                            linked_tx_hashes,
+                            timestamp: tx.timestamp.clone(),
+                            amount: tx.amount.clone(),
+                            to: tx.to.clone(),
+                            transaction_id: Some(request_id),
+                        }
+                    }
+                    None => {
+                        CustodyHistoryRecord {
+                            tx_type: tx.tx_type.clone(),
+                            tx_hash: tx.tx_hash.clone(),
+                            linked_tx_hashes: None,
+                            timestamp: tx.timestamp.clone(),
+                            amount: tx.amount.clone(),
+                            to: tx.to.clone(),
+                            transaction_id: None,
+                        }
+                    }
+                }
+            })
+            .collect::<Vec<_>>()
     }
 }

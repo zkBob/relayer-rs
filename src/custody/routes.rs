@@ -24,7 +24,7 @@ use super::{
     service::{CustodyService, JobStatusCallback, CustodyDbColumn},
     types::{
         AccountInfoRequest, GenerateAddressResponse, SignupRequest,
-        SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest, JobShortInfo, CustodyTransactionStatusResponse,
+        SignupResponse, TransactionStatusResponse, TransferRequest, TransferStatusRequest, JobShortInfo, CustodyTransactionStatusResponse, CustodyHistoryRecord,
     }, scheduled_task::ScheduledTask,
 };
 
@@ -247,5 +247,5 @@ pub async fn history<D: KeyValueDB>(
         })
         .await;
 
-    Ok(HttpResponse::Ok().json(txs))
+    Ok(HttpResponse::Ok().json(CustodyHistoryRecord::convert_vec(txs)))
 }
