@@ -356,8 +356,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                             let account = custody.account(self.account_id)?;
                             let account = account.inner.read().await;
         
-                            // TODO: move to config
-                            let fee: u64 = 100000000;
+                            let fee: u64 = self.state.settings.web3.relayer_fee;
                             let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
         
                             let tx_outputs = match &self.to {
