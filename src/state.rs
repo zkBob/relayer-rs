@@ -90,7 +90,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                     .into_iter()
                     .map(|i| i)
                     .collect();
-                tracing::debug!("mising indices: {:?}", missing_indices);
+                tracing::info!("mising indices: {:?}", missing_indices);
 
                 let from_block = self
                     .jobs
@@ -117,7 +117,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                 let mut start_block = from_block.as_u64();
                 let finish_block = to_block.as_u64();
                 let mut batch_end_block = start_block + batch_size;
-                tracing::trace!(
+                tracing::info!(
                     "start block =  {}, finish_block = {}",
                     start_block,
                     finish_block
@@ -125,9 +125,9 @@ impl<D: 'static + KeyValueDB> State<D> {
 
                 while start_block < finish_block {
 
-                    let progress = ((start_block - from_block.as_u64())* 100)/(finish_block - start_block);
+                    let progress = ((start_block - from_block.as_u64())* 100)/(finish_block - from_block.as_u64());
                     tracing::info!(
-                        "processing from block {} to block {}, current progress: {}",
+                        "batch {} - {}, current progress: {}",
                         start_block,
                         batch_end_block,
                         progress
@@ -160,7 +160,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 let commitment = Num::from_uint_reduced(NumRepr(
                                     Uint::from_big_endian(&calldata.out_commit),
                                 ));
-                                tracing::trace!(
+                                tracing::info!(
                                     "index: {}, commit {}",
                                     index,
                                     commitment.to_string()
@@ -177,10 +177,8 @@ impl<D: 'static + KeyValueDB> State<D> {
                                     );
                                 }
 
-                                tracing::trace!(
-                                    "root:\n\tpending:{:#?}\n\tfinalized:{:#?}",
-                                    pending.get_root().to_string(),
-                                    finalized.get_root().to_string()
+                                tracing::info!(
+                                    "saved commitment at index = {}",finalized.next_index()
                                 );
 
                                 let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
@@ -239,7 +237,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                     batch_end_block = min(batch_end_block + batch_size, finish_block);
                     start_block = batch_end_block;
 
-                    tracing::trace!("setting sync watermark to {}", batch_end_block);
+                    tracing::info!("saving last block  to db:  {}", batch_end_block);
                     self.jobs
                         .write({
                             let mut tx = self.jobs.transaction();
@@ -251,6 +249,14 @@ impl<D: 'static + KeyValueDB> State<D> {
                             tx
                         })
                         .unwrap();
+
+                        tracing::info!(
+                            "batch {} - {} result  {} | {}",
+                            start_block,
+                            batch_end_block,
+                            finalized.next_index(),
+                            finalized.get_root().to_string(),
+                        );
                 }
             }
 
