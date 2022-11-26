@@ -25,6 +25,7 @@ use crate::contracts::Pool;
 use crate::custody::types::{HistoryTx, PoolParams};
 
 use super::errors::CustodyServiceError;
+use super::helpers::AsU64Amount;
 use super::tx_parser::StateUpdate;
 use super::types::{HistoryDbColumn, HistoryRecord, HistoryTxType, AccountShortInfo, Fr};
 
@@ -106,12 +107,12 @@ impl Account {
             .iter()
             .take(3)
             .map(|(_, note)| note.b.as_num())
-            .fold(Num::ZERO, |acc, elem| acc + elem).to_string();
+            .fold(Num::ZERO, |acc, elem| acc + elem);
         AccountShortInfo {
             id: self.id.to_string(),
             description: self.description.clone(),
-            balance: inner.state.total_balance().to_string(),
-            single_tx_limit
+            balance: inner.state.total_balance().as_u64_amount(),
+            single_tx_limit: single_tx_limit.as_u64_amount()
         }
     }
 
@@ -169,12 +170,12 @@ impl Account {
             let history_records = match tx_type {
                 TxType::Deposit => vec![(
                     HistoryTxType::Deposit,
-                    calldata.token_amount.to_string(),
+                    calldata.token_amount as u64,
                     None,
                 )],
                 TxType::DepositPermittable => vec![(
                     HistoryTxType::Deposit,
-                    calldata.token_amount.to_string(),
+                    calldata.token_amount as u64,
                     None,
                 )],
                 TxType::Transfer => {
@@ -191,7 +192,7 @@ impl Account {
                         
                         history_records.push((
                             HistoryTxType::AggregateNotes,
-                            amount.to_string(),
+                            amount.as_u64_amount(),
                             None
                         ))
                     }
@@ -213,7 +214,7 @@ impl Account {
 
                         history_records.push((
                             tx_type,
-                            note.note.b.to_num().to_string(),
+                            note.note.b.to_num().as_u64_amount(),
                             Some(address),
                         ))
                     }
@@ -230,7 +231,7 @@ impl Account {
                             address::format_address::<PoolParams>(note.note.d, note.note.p_d);
                         history_records.push((
                             HistoryTxType::TransferOut,
-                            note.note.b.to_num().to_string(),
+                            note.note.b.to_num().as_u64_amount(),
                             Some(address),
                         ))
                     }
@@ -238,7 +239,7 @@ impl Account {
                 }
                 TxType::Withdrawal => vec![(
                     HistoryTxType::Withdrawal,
-                    (-(calldata.memo.fee as i128 + calldata.token_amount)).to_string(),
+                    (-(calldata.memo.fee as i128 + calldata.token_amount)) as u64,
                     None,
                 )],
             };
@@ -246,7 +247,7 @@ impl Account {
             let transaction_id = get_transaction_id(nullifier).ok();
 
             let timestamp = match pool {
-                Some(pool) => self.block_timestamp(pool, tx.block_num).await,
+                Some(pool) => self.block_timestamp(pool, tx.block_num).await.as_u64(),
                 None => Default::default(),
             };
 
@@ -254,7 +255,7 @@ impl Account {
                 history.push(HistoryTx {
                     tx_hash: format!("{:#x}", tx.tx_hash),
                     amount,
-                    timestamp: timestamp.to_string(),
+                    timestamp,
                     tx_type,
                     to,
                     transaction_id: transaction_id.clone(),

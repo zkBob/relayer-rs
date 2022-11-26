@@ -29,19 +29,8 @@ pub struct JobShortInfo {
 pub struct AccountShortInfo {
     pub id: String,
     pub description: String,
-    pub balance: String,
-    pub single_tx_limit: String
-}
-
-#[derive(Serialize)]
-pub struct AccountDetailedInfo {
-    pub id: String,
-    pub description: String,
-    pub index: String,
-    pub sync_status: bool,
-    pub total_balance: String,
-    pub account_balance: String,
-    pub note_balance: String,
+    pub balance: u64,
+    pub single_tx_limit: u64
 }
 
 pub enum HistoryDbColumn {
@@ -121,8 +110,8 @@ pub enum HistoryTxType {
 pub struct HistoryTx {
     pub tx_type: HistoryTxType,
     pub tx_hash: String,
-    pub timestamp: String,
-    pub amount: String,
+    pub timestamp: u64,
+    pub amount: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -243,8 +232,8 @@ pub struct CustodyHistoryRecord {
     pub tx_hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linked_tx_hashes: Option<Vec<String>>,
-    pub timestamp: String,
-    pub amount: String,
+    pub timestamp: u64,
+    pub amount: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
