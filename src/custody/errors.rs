@@ -41,6 +41,8 @@ pub enum CustodyServiceError {
     InsufficientBalance,
     #[error("account is busy")]
     AccountIsBusy,
+    #[error("account is not synced yet")]
+    AccountIsNotSynced
 }
 
 impl ResponseError for CustodyServiceError {

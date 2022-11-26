@@ -155,13 +155,18 @@ pub async fn transfer<D: KeyValueDB>(
             .ok_or(CustodyServiceError::TransactionNotFound)?;
         
         let job: JobShortInfo = serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+        if !job.status.is_final() {
+            return Err(CustodyServiceError::AccountIsBusy);
+        }
 
-        match job.status {
-            TransferStatus::Done
-            | TransferStatus::Failed(_) => {}
-            _ => {
-                return Err(CustodyServiceError::AccountIsBusy)
-            }
+        let txs = account
+            .history(|nullifier: Vec<u8>| {
+                custody.get_request_id(nullifier)
+            }, None)
+            .await;
+        let synced_tx = txs.iter().find(|tx| tx.tx_hash == job.tx_hash.clone().unwrap());
+        if synced_tx.is_none() {
+            return Err(CustodyServiceError::AccountIsNotSynced);
         }
     }
 
@@ -305,9 +310,9 @@ pub async fn history<D: KeyValueDB>(
 
     let account = custody.account(account_id)?;
     let txs = account
-        .history(&state.pool, |nullifier: Vec<u8>| {
+        .history(|nullifier: Vec<u8>| {
             custody.get_request_id(nullifier)
-        })
+        }, Some(&state.pool))
         .await;
 
     Ok(HttpResponse::Ok().json(CustodyHistoryRecord::convert_vec(txs)))

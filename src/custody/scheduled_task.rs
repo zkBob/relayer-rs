@@ -39,6 +39,15 @@ impl From<String> for TransferStatus {
     }
 }
 
+impl TransferStatus {
+    pub fn is_final(&self) -> bool {
+        match self {
+            TransferStatus::Done | TransferStatus::Failed(_) => true,
+            _ => false
+        }
+    }
+}
+
 pub struct ScheduledTask<D:'static + KeyValueDB> {
     pub request_id: String,
     pub task_index: u32,

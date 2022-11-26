@@ -146,7 +146,7 @@ impl Account {
         inner.generate_address()
     }
 
-    pub async fn history<F>(&self, pool: &Pool, get_transaction_id: F) -> Vec<HistoryTx>
+    pub async fn history<F>(&self, get_transaction_id: F, pool: Option<&Pool>) -> Vec<HistoryTx>
     where
         F: Fn(Vec<u8>) -> Result<String, String>,
     {
@@ -229,7 +229,11 @@ impl Account {
 
             let transaction_id = get_transaction_id(nullifier).ok();
 
-            let timestamp = self.block_timestamp(pool, tx.block_num).await;
+            let timestamp = match pool {
+                Some(pool) => self.block_timestamp(pool, tx.block_num).await,
+                None => Default::default(),
+            };
+
             for (tx_type, amount, to) in history_records {
                 history.push(HistoryTx {
                     tx_hash: format!("{:#x}", tx.tx_hash),
