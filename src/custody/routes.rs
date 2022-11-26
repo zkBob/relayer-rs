@@ -168,8 +168,8 @@ pub async fn transfer<D: KeyValueDB>(
     let fee: u64 = state.settings.web3.relayer_fee;
 
     let tx_parts = account.get_tx_parts(request.amount, fee, request.to.clone()).await?;
+    let mut depends_on = None;
     for (i, (to, amount)) in tx_parts.iter().enumerate() {
-        let last_account_task = account.last_task().await;
         let mut task = ScheduledTask {
             request_id: request_id.clone(),
             task_index: i as u32,
@@ -190,12 +190,16 @@ pub async fn transfer<D: KeyValueDB>(
             to: to.clone(),
             custody: custody_clone.clone(),
             state: state.clone(),
-            depends_on: last_account_task,
+            depends_on,
         };
 
         let status = if i == 0 { TransferStatus::New } else { TransferStatus::Queued };
         task.update_status(status).await?;
-        account.update_last_task(task.task_key()).await;
+        
+        let task_key = task.task_key();
+        depends_on = Some(task_key.clone());
+        account.update_last_task(task_key).await;
+        
         prover_sender.send(task).await.unwrap();
     }
 
