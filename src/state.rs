@@ -77,11 +77,9 @@ impl<D: 'static + KeyValueDB> State<D> {
             let local_finalized_root = finalized.get_root();
             let local_finalized_index = finalized.next_index();
             tracing::info!(
-                "relayer sync start\nlocal:   {} | {},\ncontract:{} | {}\n ",
+                "relayer state sync, checking indices: local={}\ncontract={} ",
                 local_finalized_index,
-                local_finalized_root.to_string(),
                 contract_index,
-                contract_root
             );
 
             if !local_finalized_root.eq(&contract_root) {
@@ -90,7 +88,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                     .into_iter()
                     .map(|i| i)
                     .collect();
-                tracing::info!("mising indices: {:?}", missing_indices);
+                tracing::debug!("mising indices: {:?}", missing_indices);
 
                 let from_block = self
                     .jobs
@@ -118,20 +116,15 @@ impl<D: 'static + KeyValueDB> State<D> {
                 let finish_block = to_block.as_u64();
                 let mut batch_end_block = start_block + batch_size;
                 tracing::info!(
-                    "start block =  {}, finish_block = {}",
+                    "starting sync from  block  #{} to block #{}",
                     start_block,
                     finish_block
                 );
 
                 while start_block < finish_block {
+                    let progress = ((start_block - from_block.as_u64()) * 100)
+                        / (finish_block - from_block.as_u64());
 
-                    let progress = ((start_block - from_block.as_u64())* 100)/(finish_block - from_block.as_u64());
-                    tracing::info!(
-                        "batch {} - {}, current progress: {}",
-                        start_block,
-                        batch_end_block,
-                        progress
-                    );
                     let events = pool
                         .get_events(
                             Some(BlockNumber::Number(U64::from(start_block))),
@@ -141,7 +134,14 @@ impl<D: 'static + KeyValueDB> State<D> {
                         .instrument(tracing::debug_span!("getting events from contract"))
                         .await
                         .unwrap();
-                    
+
+                    tracing::info!(
+                        "batch {} - {}, events: {}, progress: {}",
+                        start_block,
+                        batch_end_block,
+                        events.len(),
+                        progress,
+                    );
                     for event in events.iter() {
                         let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
                         if let Some(tx_hash) = event.transaction_hash {
@@ -160,15 +160,13 @@ impl<D: 'static + KeyValueDB> State<D> {
                                 let commitment = Num::from_uint_reduced(NumRepr(
                                     Uint::from_big_endian(&calldata.out_commit),
                                 ));
-                                tracing::info!(
+                                tracing::debug!(
                                     "index: {}, commit {}",
                                     index,
                                     commitment.to_string()
                                 );
-                                finalized.add_leafs_and_commitments(
-                                    vec![],
-                                    vec![(index, commitment)],
-                                );
+                                finalized
+                                    .add_leafs_and_commitments(vec![], vec![(index, commitment)]);
 
                                 if pending.next_index() <= index {
                                     pending.add_leafs_and_commitments(
@@ -177,8 +175,9 @@ impl<D: 'static + KeyValueDB> State<D> {
                                     );
                                 }
 
-                                tracing::info!(
-                                    "saved commitment at index = {}",finalized.next_index()
+                                tracing::debug!(
+                                    "saved commitment at index = {}",
+                                    finalized.next_index()
                                 );
 
                                 let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
@@ -234,10 +233,12 @@ impl<D: 'static + KeyValueDB> State<D> {
                             }
                         }
                     }
-                    batch_end_block = min(batch_end_block + batch_size, finish_block);
+                    
                     start_block = batch_end_block;
+                    batch_end_block = min(batch_end_block + batch_size, finish_block);
+                    
 
-                    tracing::info!("saving last block  to db:  {}", batch_end_block);
+                    tracing::debug!("saving last block  to db:  {}", batch_end_block);
                     self.jobs
                         .write({
                             let mut tx = self.jobs.transaction();
@@ -250,13 +251,12 @@ impl<D: 'static + KeyValueDB> State<D> {
                         })
                         .unwrap();
 
-                        tracing::info!(
-                            "batch {} - {} result  {} | {}",
-                            start_block,
-                            batch_end_block,
-                            finalized.next_index(),
-                            finalized.get_root().to_string(),
-                        );
+                    tracing::debug!(
+                        "batch {} - {} new next index:  {}",
+                        start_block,
+                        batch_end_block,
+                        finalized.next_index(),
+                    );
                 }
             }
 
