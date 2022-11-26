@@ -15,9 +15,9 @@ use libzkbob_rs::{
 use libzeropool::native::account::Account as NativeAccount;
 use memo_parser::memo::TxType;
 use memo_parser::memoparser;
-use tokio::sync::RwLock;
 use std::fmt::Display;
 use std::str::FromStr;
+use tokio::sync::RwLock;
 
 use uuid::Uuid;
 
@@ -49,7 +49,6 @@ impl Display for DataType {
 pub fn data_file_path(base_path: &str, account_id: Uuid, data_type: DataType) -> String {
     format!("{}/{}/{}", base_path, account_id.as_hyphenated(), data_type)
 }
-
 
 pub struct Account {
     pub inner: RwLock<NativeUserAccount<kvdb_rocksdb::Database, PoolBN256>>,
@@ -101,10 +100,18 @@ impl Account {
 
     pub async fn short_info(&self) -> AccountShortInfo {
         let inner = self.inner.read().await;
+        let single_tx_limit = inner
+            .state
+            .get_usable_notes()
+            .iter()
+            .take(3)
+            .map(|(_, note)| note.b.as_num())
+            .fold(Num::ZERO, |acc, elem| acc + elem).to_string();
         AccountShortInfo {
             id: self.id.to_string(),
             description: self.description.clone(),
             balance: inner.state.total_balance().to_string(),
+            single_tx_limit
         }
     }
 
@@ -190,13 +197,19 @@ impl Account {
                     }
                     
                     for note in dec_memo.in_notes.iter() {
-                        let loopback = dec_memo.out_notes
+                        let loopback = dec_memo
+                            .out_notes
                             .iter()
                             .find(|out_note| out_note.index == note.index)
                             .is_some();
 
-                        let tx_type = if loopback { HistoryTxType::ReturnedChange } else { HistoryTxType::TransferIn };
-                        let address = address::format_address::<PoolParams>(note.note.d, note.note.p_d);
+                        let tx_type = if loopback {
+                            HistoryTxType::ReturnedChange
+                        } else {
+                            HistoryTxType::TransferIn
+                        };
+                        let address =
+                            address::format_address::<PoolParams>(note.note.d, note.note.p_d);
 
                         history_records.push((
                             tx_type,
@@ -205,13 +218,16 @@ impl Account {
                         ))
                     }
 
-                    let out_notes = dec_memo.out_notes
-                        .iter()
-                        .filter(|out_note| {
-                            dec_memo.in_notes.iter().find(|in_note| in_note.index == out_note.index).is_none()
-                        });
+                    let out_notes = dec_memo.out_notes.iter().filter(|out_note| {
+                        dec_memo
+                            .in_notes
+                            .iter()
+                            .find(|in_note| in_note.index == out_note.index)
+                            .is_none()
+                    });
                     for note in out_notes {
-                        let address = address::format_address::<PoolParams>(note.note.d, note.note.p_d);
+                        let address =
+                            address::format_address::<PoolParams>(note.note.d, note.note.p_d);
                         history_records.push((
                             HistoryTxType::TransferOut,
                             note.note.b.to_num().to_string(),
@@ -368,16 +384,15 @@ impl Account {
     }
 
     async fn block_timestamp(&self, pool: &Pool, block_number: U64) -> U256 {
-        let timestamp = self.history
+        let timestamp = self
+            .history
             .get(
-                HistoryDbColumn::BlockTimestampsCache.into(), 
-                &block_number.as_u64().to_be_bytes()
+                HistoryDbColumn::BlockTimestampsCache.into(),
+                &block_number.as_u64().to_be_bytes(),
             )
             .ok()
             .flatten()
-            .map(|bytes| {
-                U256::from_big_endian(&bytes)
-            });
+            .map(|bytes| U256::from_big_endian(&bytes));
 
         match timestamp {
             Some(timestamp) => timestamp,
@@ -385,21 +400,23 @@ impl Account {
                 let timestamp = pool.block_timestamp(block_number).await;
                 match timestamp {
                     Ok(timestamp) => {
-                        self.history.write({
-                            let mut timestamp_bytes = [0; 32];
-                            timestamp.to_big_endian(&mut timestamp_bytes);
-                            
-                            let mut tx = self.history.transaction();
-                            tx.put(
-                                HistoryDbColumn::BlockTimestampsCache.into(), 
-                                &block_number.as_u64().to_be_bytes(), 
-                                &timestamp_bytes
-                            );
-                            tx
-                        }).unwrap();
+                        self.history
+                            .write({
+                                let mut timestamp_bytes = [0; 32];
+                                timestamp.to_big_endian(&mut timestamp_bytes);
+
+                                let mut tx = self.history.transaction();
+                                tx.put(
+                                    HistoryDbColumn::BlockTimestampsCache.into(),
+                                    &block_number.as_u64().to_be_bytes(),
+                                    &timestamp_bytes,
+                                );
+                                tx
+                            })
+                            .unwrap();
                         timestamp
                     }
-                    Err(_) => Default::default()
+                    Err(_) => Default::default(),
                 }
             }
         }

@@ -96,6 +96,7 @@ pub struct Web3Settings {
     pub credentials: Credentials,
     pub scheduler_interval_sec: u64,
     pub start_block: Option<u64>,
+    pub batch_size: u64
 }
 
 #[derive(Serialize,Deserialize,Clone,Debug)]

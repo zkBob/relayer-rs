@@ -1,4 +1,3 @@
-use actix_web::web::Data;
 use relayer_rs::{
     configuration::get_config,
     contracts::Pool,
