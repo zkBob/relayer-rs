@@ -339,42 +339,48 @@ impl<D: KeyValueDB> ScheduledTask<D> {
         match previous_status {
             TransferStatus::Done => {
                 // TODO: replace this with optimistic state
-                self.state.sync().await.unwrap();
-
-                let tx = {
-                    let custody = self.custody.read().await;
-                    custody.sync_account(self.account_id, &self.state).await?;
-                    let account = custody.account(self.account_id)?;
-                    let account = account.inner.read().await;
-
-                    // TODO: move to config
-                    let fee: u64 = 100000000;
-                    let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
-
-                    let tx_outputs = match &self.to {
-                        Some(to) => {
-                            vec![TxOutput {
-                                to: to.clone(),
-                                amount: TokenAmount::new(self.amount),
-                            }]
-                        },
-                        None => vec![],
-                    };
-                    let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], tx_outputs);
-
-                    account.create_tx(transfer, None, None)
-                        .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))
-                };
-
-                match tx {
-                    Ok(tx) => {
-                        self.tx = Some(tx);
-                        self.update_status(TransferStatus::Proving).await?;
-                        Ok(TransferStatus::Proving)
-                    },
+                match self.state.sync().await {
+                    Ok(_) => { 
+                        let tx = {
+                            let custody = self.custody.read().await;
+                            custody.sync_account(self.account_id, &self.state).await?;
+                            let account = custody.account(self.account_id)?;
+                            let account = account.inner.read().await;
+        
+                            // TODO: move to config
+                            let fee: u64 = 100000000;
+                            let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
+        
+                            let tx_outputs = match &self.to {
+                                Some(to) => {
+                                    vec![TxOutput {
+                                        to: to.clone(),
+                                        amount: TokenAmount::new(self.amount),
+                                    }]
+                                },
+                                None => vec![],
+                            };
+                            let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], tx_outputs);
+        
+                            account.create_tx(transfer, None, None)
+                                .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))
+                        };
+        
+                        match tx {
+                            Ok(tx) => {
+                                self.tx = Some(tx);
+                                self.update_status(TransferStatus::Proving).await?;
+                                Ok(TransferStatus::Proving)
+                            },
+                            Err(err) => {
+                                self.update_status(TransferStatus::Failed(err.clone())).await?;
+                                Ok(TransferStatus::Failed(err))
+                            }
+                        }
+                     }
                     Err(err) => {
-                        self.update_status(TransferStatus::Failed(err.clone())).await?;
-                        Ok(TransferStatus::Failed(err))
+                        tracing::warn!("failed to sync state with error: {:?}", err);
+                        Ok(TransferStatus::Queued)
                     }
                 }
             }

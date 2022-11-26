@@ -33,6 +33,7 @@ pub enum SyncError {
     BadAbi(std::io::Error),
     GeneralError(String),
     ContractException(web3::contract::Error),
+    RpcNodeUnavailable,
 }
 
 impl From<std::io::Error> for SyncError {
@@ -80,28 +81,9 @@ impl<D: 'static + KeyValueDB> State<D> {
             tracing::info!("contract root {}", contract_root.to_string());
 
             if !local_finalized_root.eq(&contract_root) {
-                let missing_indices: Vec<u64> = (local_finalized_index..contract_index.as_u64())
-                    .step_by(OUT + 1)
-                    .into_iter()
-                    .map(|i| i)
-                    .collect();
-                tracing::debug!("mising indices: {:?}", missing_indices);
+                tracing::info!("mising indices: from {:?} to {:?}", local_finalized_index, contract_index);
 
-                let from_block = {
-                    self.jobs
-                        .get(JobsDbColumn::SyncedBlockIndex as u32, "last_block".as_bytes())
-                        .ok()
-                        .flatten()
-                        .map(|from_block| {
-                            BlockNumber::Number(U64::from_big_endian(&from_block))
-                        })
-                }
-                .or(
-                    self.settings.web3.start_block
-                        .map(|block_num| BlockNumber::Number(U64::from(block_num)))
-                )
-                .or(Some(BlockNumber::Earliest));
-                
+                let from_block = self.get_from_block();
                 let to_block = pool.block_number().await.map_err(|err| {
                     SyncError::GeneralError(format!("failed to get block number: {}", err))
                 })?;
@@ -112,17 +94,14 @@ impl<D: 'static + KeyValueDB> State<D> {
                 let events = pool
                     .get_events(from_block, Some(BlockNumber::Number(to_block)), None)
                     .instrument(tracing::debug_span!("getting events from contract"))
-                    .await
-                    .unwrap();
+                    .await?;
 
-                std::fs::write(
-                    "tests/data/events.json",
-                    serde_json::to_string(&events).unwrap(),
-                )
-                .unwrap();
+                // std::fs::write(
+                //     "tests/data/events.json",
+                //     serde_json::to_string(&events).unwrap(),
+                // )
+                // .unwrap();
 
-                // let span = tracing::debug_span!("processing events");
-                // span.enter();
                 //TODO: combine all of the futures in a single one then wrap it all in a span with underlying spans 
                 for event in events.iter() {
                     let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
@@ -191,12 +170,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                         }
                     }
                 }
-            
-                self.jobs.write({
-                    let mut tx = self.jobs.transaction();
-                    tx.put(JobsDbColumn::SyncedBlockIndex as u32, "last_block".as_bytes(), &to_block.as_u64().to_be_bytes());
-                    tx
-                }).unwrap();
+                self.save_last_block(to_block)?;
             }
 
 
@@ -262,5 +236,33 @@ impl<D: 'static + KeyValueDB> State<D> {
             }
         }
         Ok(jobs)
+    }
+
+
+    fn get_from_block(&self) -> Option<BlockNumber> {
+        self.jobs
+            .get(JobsDbColumn::SyncedBlockIndex as u32, "last_block".as_bytes())
+            .ok()
+            .flatten()
+            .map(|from_block| {
+                BlockNumber::Number(U64::from_big_endian(&from_block))
+            })
+            .or(
+                self.settings.web3.start_block
+                    .map(|block_num| BlockNumber::Number(U64::from(block_num)))
+            )
+            .or(Some(BlockNumber::Earliest))
+    }
+
+    fn save_last_block(&self, to_block: U64) -> Result<(), SyncError> {
+        self.jobs
+            .write({
+                let mut tx = self.jobs.transaction();
+                tx.put(JobsDbColumn::SyncedBlockIndex as u32, "last_block".as_bytes(), &to_block.as_u64().to_be_bytes());
+                tx
+            })
+            .map_err(|err| {
+                SyncError::GeneralError(format!("failed to save last synced block: {:?}", err))
+            })
     }
 }

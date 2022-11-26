@@ -242,9 +242,16 @@ impl CustodyService {
             let rt = tokio::runtime::Runtime::new().unwrap();
             loop {
                 rt.block_on(async {
-                    state.sync().instrument(tracing::debug_span!("Sync custody state...")).await.unwrap();
-                    let mut next_index = next_index_clone.write().await;
-                    *next_index = state.finalized.lock().await.next_index();
+                    let sync_result = state.sync().instrument(tracing::debug_span!("Sync custody state...")).await;
+                    match sync_result {
+                        Ok(_) => {
+                            let mut next_index = next_index_clone.write().await;
+                            *next_index = state.finalized.lock().await.next_index();
+                        },
+                        Err(err) => {
+                            tracing::warn!("failed to sync state with error: {:?}", err);
+                        }   
+                    }
                 });
                 thread::sleep(sync_interval);
             }
