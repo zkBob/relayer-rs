@@ -1,10 +1,8 @@
-use std::{
-    time::SystemTime, io,
-};
+use std::{cmp::min, io, time::SystemTime};
 
 use actix_web::web::{self, Data};
 use ethabi::ethereum_types::U64;
-use kvdb::{DBOp::Insert, DBTransaction, KeyValueDB, DBKey};
+use kvdb::{DBKey, DBOp::Insert, DBTransaction, KeyValueDB};
 use libzeropool::{
     constants::OUT,
     fawkes_crypto::{
@@ -22,8 +20,10 @@ use uuid::Uuid;
 use web3::types::BlockNumber;
 
 use crate::{
-    configuration::Settings, contracts::Pool,
-    helpers, types::job::{Job, JobStatus},
+    configuration::Settings,
+    contracts::Pool,
+    helpers,
+    types::job::{Job, JobStatus},
 };
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -51,8 +51,8 @@ pub enum JobsDbColumn {
     Jobs = 0,
     JobsIndex = 1,
     Nullifiers = 2,
-    TxCheckTasks = 3, // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective, 
-                     //so we copy only those keys that require transaction receipt check
+    TxCheckTasks = 3, // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective,
+    //so we copy only those keys that require transaction receipt check
     SyncedBlockIndex = 4,
 }
 
@@ -76,8 +76,13 @@ impl<D: 'static + KeyValueDB> State<D> {
             let (contract_index, contract_root) = pool.root().await?;
             let local_finalized_root = finalized.get_root();
             let local_finalized_index = finalized.next_index();
-            tracing::info!("local root {}", local_finalized_root.to_string());
-            tracing::info!("contract root {}", contract_root.to_string());
+            tracing::info!(
+                "relayer sync start\nlocal:   {} | {},\ncontract:{} | {}\n ",
+                local_finalized_index,
+                local_finalized_root.to_string(),
+                contract_index,
+                contract_root
+            );
 
             if !local_finalized_root.eq(&contract_root) {
                 let missing_indices: Vec<u64> = (local_finalized_index..contract_index.as_u64())
@@ -87,123 +92,174 @@ impl<D: 'static + KeyValueDB> State<D> {
                     .collect();
                 tracing::debug!("mising indices: {:?}", missing_indices);
 
-                let from_block = {
-                    self.jobs
-                        .get(JobsDbColumn::SyncedBlockIndex as u32, "last_block".as_bytes())
-                        .ok()
-                        .flatten()
-                        .map(|from_block| {
-                            BlockNumber::Number(U64::from_big_endian(&from_block))
-                        })
-                }
-                .or(
-                    self.settings.web3.start_block
-                        .map(|block_num| BlockNumber::Number(U64::from(block_num)))
-                )
-                .or(Some(BlockNumber::Earliest));
-                
+                let from_block = self
+                    .jobs
+                    .get(
+                        JobsDbColumn::SyncedBlockIndex as u32,
+                        "last_block".as_bytes(),
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|from_block| U64::from_big_endian(&from_block))
+                    .unwrap_or(
+                        self.settings
+                            .web3
+                            .start_block
+                            .map(|block_num| U64::from(block_num))
+                            .unwrap_or(U64::from(0)),
+                    );
+
                 let to_block = pool.block_number().await.map_err(|err| {
                     SyncError::GeneralError(format!("failed to get block number: {}", err))
                 })?;
-                
-                tracing::info!("sync blocks from: {:?}, to: {}", from_block.clone().unwrap(), to_block);
 
-                // TODO: implement batch retrieval and RPC fallback
-                let events = pool
-                    .get_events(from_block, Some(BlockNumber::Number(to_block)), None)
-                    .instrument(tracing::debug_span!("getting events from contract"))
-                    .await
-                    .unwrap();
+                let batch_size = self.settings.web3.batch_size;
+                let mut start_block = from_block.as_u64();
+                let finish_block = to_block.as_u64();
+                let mut batch_end_block = start_block + batch_size;
+                tracing::trace!(
+                    "start block =  {}, finish_block = {}",
+                    start_block,
+                    finish_block
+                );
 
-                std::fs::write(
-                    "tests/data/events.json",
-                    serde_json::to_string(&events).unwrap(),
-                )
-                .unwrap();
+                while start_block < finish_block {
 
-                // let span = tracing::debug_span!("processing events");
-                // span.enter();
-                //TODO: combine all of the futures in a single one then wrap it all in a span with underlying spans 
-                for event in events.iter() {
-                    let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
-                    if let Some(tx_hash) = event.transaction_hash {
-                        if let Some(tx) = pool.get_transaction(tx_hash).instrument(tracing::debug_span!("getting transaction by hash", hash = tx_hash.to_string())).await.unwrap() {
-                            let calldata = memoparser::parse_calldata(&tx.input.0, None)
-                                .expect("Calldata is invalid!");
-                            
-                            let commitment = Num::from_uint_reduced(NumRepr(
-                                Uint::from_big_endian(&calldata.out_commit),
-                            ));
-                            tracing::debug!("index: {}, commit {}", index, commitment.to_string());
-                            finalized.add_leafs_and_commitments(vec![], vec![(index, commitment)]);
+                    let progress = ((start_block - from_block.as_u64())* 100)/(finish_block - start_block);
+                    tracing::info!(
+                        "processing from block {} to block {}, current progress: {}",
+                        start_block,
+                        batch_end_block,
+                        progress
+                    );
+                    let events = pool
+                        .get_events(
+                            Some(BlockNumber::Number(U64::from(start_block))),
+                            Some(BlockNumber::Number(U64::from(batch_end_block))),
+                            None,
+                        )
+                        .instrument(tracing::debug_span!("getting events from contract"))
+                        .await
+                        .unwrap();
+                    
+                    for event in events.iter() {
+                        let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
+                        if let Some(tx_hash) = event.transaction_hash {
+                            if let Some(tx) = pool
+                                .get_transaction(tx_hash)
+                                .instrument(tracing::debug_span!(
+                                    "getting transaction by hash",
+                                    hash = tx_hash.to_string()
+                                ))
+                                .await
+                                .unwrap()
+                            {
+                                let calldata = memoparser::parse_calldata(&tx.input.0, None)
+                                    .expect("Calldata is invalid!");
 
-                            if pending.next_index() <= index {
-                                pending
-                                    .add_leafs_and_commitments(vec![], vec![(index, commitment)]);
+                                let commitment = Num::from_uint_reduced(NumRepr(
+                                    Uint::from_big_endian(&calldata.out_commit),
+                                ));
+                                tracing::trace!(
+                                    "index: {}, commit {}",
+                                    index,
+                                    commitment.to_string()
+                                );
+                                finalized.add_leafs_and_commitments(
+                                    vec![],
+                                    vec![(index, commitment)],
+                                );
+
+                                if pending.next_index() <= index {
+                                    pending.add_leafs_and_commitments(
+                                        vec![],
+                                        vec![(index, commitment)],
+                                    );
+                                }
+
+                                tracing::trace!(
+                                    "root:\n\tpending:{:#?}\n\tfinalized:{:#?}",
+                                    pending.get_root().to_string(),
+                                    finalized.get_root().to_string()
+                                );
+
+                                let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
+                                    Uint::from_big_endian(&calldata.nullifier),
+                                ));
+
+                                // TODO: fix this
+                                let memo = Vec::from(
+                                    &tx.input.0[644..(644 + calldata.memo_size) as usize],
+                                );
+
+                                let job_id = Uuid::new_v4();
+
+                                let job = Job {
+                                    id: job_id.as_hyphenated().to_string(),
+                                    created: SystemTime::now(),
+                                    status: JobStatus::Done,
+                                    transaction_request: None,
+                                    transaction: Some(tx),
+                                    index,
+                                    commitment,
+                                    nullifier,
+                                    root: None,
+                                    memo: helpers::truncate_memo_prefix(calldata.tx_type, memo),
+                                };
+
+                                tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash));
+                                let db_transaction = DBTransaction {
+                                    ops: vec![
+                                        Insert {
+                                            col: JobsDbColumn::Jobs as u32,
+                                            key: DBKey::from_vec(
+                                                job_id
+                                                    .as_hyphenated()
+                                                    .to_string()
+                                                    .as_bytes()
+                                                    .to_vec(),
+                                            ),
+                                            value: serde_json::to_vec(&job).unwrap(),
+                                        },
+                                        Insert {
+                                            col: JobsDbColumn::JobsIndex as u32,
+                                            key: DBKey::from_slice(&job.index.to_be_bytes()),
+                                            value: job_id
+                                                .as_hyphenated()
+                                                .to_string()
+                                                .as_bytes()
+                                                .to_vec(),
+                                        },
+                                    ],
+                                };
+                                self.jobs.write(db_transaction)?;
                             }
-
-                            tracing::debug!(
-                                "root:\n\tpending:{:#?}\n\tfinalized:{:#?}",
-                                pending.get_root().to_string(),
-                                finalized.get_root().to_string()
-                            );
-
-                            let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
-                                Uint::from_big_endian(&calldata.nullifier),
-                            ));
-
-                            // TODO: fix this
-                            let memo = Vec::from(&tx.input.0[644..(644 + calldata.memo_size) as usize]);
-
-                            let job_id = Uuid::new_v4();
-
-                            let job = Job {
-                                id: job_id.as_hyphenated().to_string(),
-                                created: SystemTime::now(),
-                                status: JobStatus::Done,
-                                transaction_request: None,
-                                transaction: Some(tx),
-                                index,
-                                commitment,
-                                nullifier,
-                                root: None,
-                                memo: helpers::truncate_memo_prefix(calldata.tx_type, memo)
-                            };
-
-                            tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash));
-                            let db_transaction = DBTransaction {
-                                ops: vec![
-                                    Insert {
-                                        col: JobsDbColumn::Jobs as u32,
-                                        key: DBKey::from_vec(
-                                            job_id.as_hyphenated().to_string().as_bytes().to_vec(),
-                                        ),
-                                        value: serde_json::to_vec(&job).unwrap(),
-                                    },
-                                    Insert { 
-                                        col: JobsDbColumn::JobsIndex as u32,
-                                        key: DBKey::from_slice(&job.index.to_be_bytes()),
-                                        value: job_id.as_hyphenated().to_string().as_bytes().to_vec(),
-                                    }
-                                ],
-                            };
-                            self.jobs.write(db_transaction)?;
                         }
                     }
+                    batch_end_block = min(batch_end_block + batch_size, finish_block);
+                    start_block = batch_end_block;
+
+                    tracing::trace!("setting sync watermark to {}", batch_end_block);
+                    self.jobs
+                        .write({
+                            let mut tx = self.jobs.transaction();
+                            tx.put(
+                                JobsDbColumn::SyncedBlockIndex as u32,
+                                "last_block".as_bytes(),
+                                &batch_end_block.to_be_bytes(),
+                            );
+                            tx
+                        })
+                        .unwrap();
                 }
-            
-                self.jobs.write({
-                    let mut tx = self.jobs.transaction();
-                    tx.put(JobsDbColumn::SyncedBlockIndex as u32, "last_block".as_bytes(), &to_block.as_u64().to_be_bytes());
-                    tx
-                }).unwrap();
             }
 
-
             tracing::info!(
-                "local finalized root after sync {:#?}, index : {}",
+                "relayer sync finish\nlocal:   {} | {},\ncontract:{} | {}",
+                finalized.next_index(),
                 finalized.get_root().to_string(),
-                finalized.next_index()
+                contract_index,
+                contract_root
             );
         }
 

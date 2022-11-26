@@ -1,13 +1,15 @@
 use crate::state::State;
 
-use ethabi::ethereum_types::{H256, U64};
+use ethabi::ethereum_types::{H256, U64, U256};
 use serde::{Deserialize, Serialize};
+use web3::types::LogWithMeta;
 use std::fmt::Debug;
 
 use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}};
 
 use super::{tx_parser::DecMemo, scheduled_task::TransferStatus};
 
+pub type ContractEvent = LogWithMeta<(U256,H256,H256)>;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
