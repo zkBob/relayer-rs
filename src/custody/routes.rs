@@ -46,7 +46,7 @@ pub async fn account_info<D: KeyValueDB>(
     custody.sync_account(account_id, &state).await?;
 
     let account_info = custody
-        .account_info(account_id)
+        .account_info(account_id, state.settings.web3.relayer_fee)
         .await
         .ok_or(CustodyServiceError::AccountNotFound)?;
 
@@ -106,11 +106,12 @@ pub async fn signup<D: KeyValueDB>(
 pub async fn list_accounts<D: KeyValueDB>(
     custody: Custody,
     bearer: BearerAuth,
+    state: Data<State<D>>
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
     custody.validate_token(bearer.token())?;
 
-    Ok(HttpResponse::Ok().json(custody.list_accounts().await))
+    Ok(HttpResponse::Ok().json(custody.list_accounts(state.settings.web3.relayer_fee).await))
 }
 
 pub async fn transfer<D: KeyValueDB>(
@@ -312,6 +313,8 @@ pub async fn history<D: KeyValueDB>(
 
     custody.sync_account(account_id, &state).await?;
 
+    let fee = state.settings.web3.relayer_fee;
+
     let account = custody.account(account_id)?;
     let txs = account
         .history(|nullifier: Vec<u8>| {
@@ -319,5 +322,5 @@ pub async fn history<D: KeyValueDB>(
         }, Some(&state.pool))
         .await;
 
-    Ok(HttpResponse::Ok().json(CustodyHistoryRecord::convert_vec(txs)))
+    Ok(HttpResponse::Ok().json(CustodyHistoryRecord::convert_vec(txs, fee)))
 }

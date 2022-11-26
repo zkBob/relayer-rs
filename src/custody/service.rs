@@ -385,22 +385,22 @@ impl CustodyService {
         Ok(tx_request)
     }
 
-    pub async fn account_info(&self, account_id: Uuid) -> Option<AccountShortInfo> {
+    pub async fn account_info(&self, account_id: Uuid, fee: u64) -> Option<AccountShortInfo> {
         match self
             .accounts
             .iter()
             .find(|account| account.id == account_id)
         {
-            Some(account) => Some(account.short_info().await),
+            Some(account) => Some(account.short_info(fee).await),
             None => None,
         }
     }
 
-    pub async fn list_accounts(&self) -> Vec<AccountShortInfo> {
+    pub async fn list_accounts(&self, fee: u64) -> Vec<AccountShortInfo> {
         let mut res: Vec<AccountShortInfo> = vec![];
 
         for account in self.accounts.iter() {
-            res.push(account.short_info().await);
+            res.push(account.short_info(fee).await);
         }
 
         res

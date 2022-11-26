@@ -1,8 +1,9 @@
-use ethabi::ethereum_types::{U64, U256};
+use ethabi::ethereum_types::{U256, U64};
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
 use libzeropool::fawkes_crypto::ff_uint::NumRepr;
 use libzeropool::fawkes_crypto::rand::Rng;
+use libzeropool::native::account::Account as NativeAccount;
 use libzeropool::POOL_PARAMS;
 use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
 use libzkbob_rs::address;
@@ -12,7 +13,6 @@ use libzkbob_rs::{
     merkle::MerkleTree,
     sparse_array::SparseArray,
 };
-use libzeropool::native::account::Account as NativeAccount;
 use memo_parser::memo::TxType;
 use memo_parser::memoparser;
 use std::fmt::Display;
@@ -27,7 +27,7 @@ use crate::custody::types::{HistoryTx, PoolParams};
 use super::errors::CustodyServiceError;
 use super::helpers::AsU64Amount;
 use super::tx_parser::StateUpdate;
-use super::types::{HistoryDbColumn, HistoryRecord, HistoryTxType, AccountShortInfo, Fr};
+use super::types::{AccountShortInfo, Fr, HistoryDbColumn, HistoryRecord, HistoryTxType};
 
 pub enum DataType {
     Tree,
@@ -57,11 +57,16 @@ pub struct Account {
     pub description: String,
     pub history: kvdb_rocksdb::Database,
 
-    last_task_key: RwLock<Option<Vec<u8>>>
+    last_task_key: RwLock<Option<Vec<u8>>>,
 }
 
 impl Account {
-    pub async fn get_tx_parts(&self, total_amount: u64, fee: u64, to: String) -> Result<Vec<(Option<String>, Num<Fr>)>, CustodyServiceError> {
+    pub async fn get_tx_parts(
+        &self,
+        total_amount: u64,
+        fee: u64,
+        to: String,
+    ) -> Result<Vec<(Option<String>, Num<Fr>)>, CustodyServiceError> {
         let account = self.inner.read().await;
         let amount = Num::from_uint(NumRepr::from(total_amount)).unwrap();
         let fee = Num::from_uint(NumRepr::from(fee)).unwrap();
@@ -71,9 +76,9 @@ impl Account {
 
         if account_balance.to_uint() >= (amount + fee).to_uint() {
             parts.push((Some(to), amount));
-            return Ok(parts)
+            return Ok(parts);
         }
-        
+
         let notes = account.state.get_usable_notes();
         let mut balance_is_sufficient = false;
         for notes in notes.chunks(3) {
@@ -99,20 +104,29 @@ impl Account {
         Ok(parts)
     }
 
-    pub async fn short_info(&self) -> AccountShortInfo {
+    pub async fn short_info(&self, fee: u64) -> AccountShortInfo {
         let inner = self.inner.read().await;
-        let single_tx_limit = inner
-            .state
-            .get_usable_notes()
-            .iter()
-            .take(3)
-            .map(|(_, note)| note.b.as_num())
-            .fold(Num::ZERO, |acc, elem| acc + elem);
+        let fee_as_num = Num::from_uint(NumRepr::from(fee)).unwrap();
+        let mut max_transfer_amount = inner.state.total_balance() - fee_as_num;        
+
+        loop {
+            match self
+                .get_tx_parts(max_transfer_amount.as_u64_amount(), fee, "".to_string())
+                .await
+            {
+                Err(CustodyServiceError::InsufficientBalance) => {
+                    max_transfer_amount -= fee_as_num;
+                    continue;
+                }
+                _ => break,
+            }
+        }
+
         AccountShortInfo {
             id: self.id.to_string(),
             description: self.description.clone(),
             balance: inner.state.total_balance().as_u64_amount(),
-            single_tx_limit: single_tx_limit.as_u64_amount()
+            max_transfer_amount: max_transfer_amount.as_u64_amount(),
         }
     }
 
@@ -168,19 +182,15 @@ impl Account {
             let nullifier = calldata.nullifier;
 
             let history_records = match tx_type {
-                TxType::Deposit => vec![(
-                    HistoryTxType::Deposit,
-                    calldata.token_amount as u64,
-                    None,
-                )],
-                TxType::DepositPermittable => vec![(
-                    HistoryTxType::Deposit,
-                    calldata.token_amount as u64,
-                    None,
-                )],
+                TxType::Deposit => {
+                    vec![(HistoryTxType::Deposit, calldata.token_amount as u64, None)]
+                }
+                TxType::DepositPermittable => {
+                    vec![(HistoryTxType::Deposit, calldata.token_amount as u64, None)]
+                }
                 TxType::Transfer => {
                     let mut history_records = vec![];
-                    
+
                     if dec_memo.in_notes.len() == 0 && dec_memo.out_notes.len() == 0 {
                         let amount = {
                             let previous_amount = match last_account {
@@ -189,14 +199,14 @@ impl Account {
                             };
                             dec_memo.acc.unwrap().b.as_num() - previous_amount
                         };
-                        
+
                         history_records.push((
                             HistoryTxType::AggregateNotes,
                             amount.as_u64_amount(),
-                            None
+                            None,
                         ))
                     }
-                    
+
                     for note in dec_memo.in_notes.iter() {
                         let loopback = dec_memo
                             .out_notes
@@ -319,7 +329,7 @@ impl Account {
                 &data_file_path(base_path, id, DataType::History),
             )
             .unwrap(),
-            last_task_key: RwLock::new(None)
+            last_task_key: RwLock::new(None),
         }
     }
 
@@ -370,7 +380,7 @@ impl Account {
                 &data_file_path(base_path, id, DataType::History),
             )
             .unwrap(),
-            last_task_key: RwLock::new(None)
+            last_task_key: RwLock::new(None),
         })
     }
 

@@ -78,13 +78,12 @@ impl<D: 'static + KeyValueDB> State<D> {
             let local_finalized_root = finalized.get_root();
             let local_finalized_index = finalized.next_index();
             tracing::info!(
-                "relayer state sync, checking indices: local={}\ncontract={} ",
+                "relayer state sync, checking indices: local={} contract={} ",
                 local_finalized_index,
                 contract_index,
             );
 
             if !local_finalized_root.eq(&contract_root) {
-                tracing::info!("mising indices: from {:?} to {:?}", local_finalized_index, contract_index);
 
                 let from_block = self.get_from_block();
                 let to_block = pool.block_number().await.map_err(|err| {
