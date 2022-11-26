@@ -177,7 +177,7 @@ impl From<Vec<JobShortInfo>> for CustodyTransactionStatusResponse {
     fn from(jobs: Vec<JobShortInfo>) -> Self {
         let mut tx_hashes = jobs
             .iter()
-            .filter(|job| job.tx_hash.is_some())
+            .filter(|job| job.tx_hash.is_some() && job.status != TransferStatus::Mining)
             .map(|job| job.tx_hash.clone().unwrap())
             .collect::<Vec<_>>();
 
