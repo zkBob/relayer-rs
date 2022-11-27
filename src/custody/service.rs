@@ -129,14 +129,21 @@ pub fn start_prover<D: KeyValueDB>(
 ) {
     tokio::task::spawn(async move {
         while let Some(mut task) = prover_receiver.recv().await {
-            match task.prepare_task().await.unwrap() {
-                TransferStatus::Failed(_) => continue,
-                TransferStatus::Proving => {},
-                TransferStatus::Queued => {
+            match task.prepare_task().await {
+                Ok(status) => match status {
+                    TransferStatus::Failed(_) => continue,
+                    TransferStatus::Proving => {},
+                    TransferStatus::Queued => {
+                        prover_sender.send(task).await.unwrap();
+                        continue;
+                    }
+                    _ => unreachable!(),
+                },
+                Err(err) => {
+                    tracing::error!("failed to prepare task: {}, task queued again", err);
                     prover_sender.send(task).await.unwrap();
                     continue;
                 }
-                _ => unreachable!(),
             };
 
             let status_sender = status_sender.clone();
@@ -152,7 +159,12 @@ pub fn start_prover<D: KeyValueDB>(
                         }
                         Err(e) => {
                             tracing::error!("error from prover: {:#?}", &e);
-                            task.update_status(TransferStatus::Failed(e)).await.unwrap();
+                            match task.update_status(TransferStatus::Failed(e)).await {
+                                Ok(_) => {},
+                                Err(err) => {
+                                    tracing::error!("failed to update task status: {}", err);
+                                }
+                            };
                         }
                     }
                 });
@@ -174,6 +186,9 @@ pub fn start_status_updater<D: KeyValueDB>(
                         tokio::time::sleep(Duration::from_secs(10)).await; //TODO: move to config
                         status_updater_sender.send(task).await.unwrap();
                     });
+                },
+                Err(err) => {
+                    tracing::error!("failed to fetch status: {}", err);
                 }
                 _ => (),
             };

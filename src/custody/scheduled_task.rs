@@ -216,7 +216,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                         );
                         if status != self.status || self.tx_hash != Some(tx_hash.clone()) {
                             self.tx_hash = Some(tx_hash);
-                            self.update_status(status.clone()).await.unwrap();
+                            self.update_status(status.clone()).await?;
                         }
 
                         match status {
@@ -243,8 +243,8 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                             self.update_status(TransferStatus::Failed(
                                 CustodyServiceError::TaskRejectedByRelayer(failure_reason),
                             ))
-                            .await
-                            .unwrap();
+                            .await?;
+
                             Ok(())
                         // waiting for transaction to be mined, schedule a retry
                         } else {
@@ -266,8 +266,8 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                     self.update_status(TransferStatus::Failed(
                         CustodyServiceError::RetriesExhausted,
                     ))
-                    .await
-                    .unwrap();
+                    .await?;
+
                     Err(CustodyServiceError::RetriesExhausted)
                 }
             }
@@ -278,7 +278,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
         let nullifier_exists = self.db.has_key(
             CustodyDbColumn::NullifierIndex.into(), 
             &nullifier
-        ).unwrap();
+        ).map_err(|err| err.to_string())?;
 
         if !nullifier_exists {
             let tx = {
@@ -305,7 +305,9 @@ impl<D: KeyValueDB> ScheduledTask<D> {
         tracing::info!("update status initiated");
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .map_err(|err| {
+                CustodyServiceError::InternalError(err.to_string())
+            })?
             .as_secs();
 
         let job_status_info = JobShortInfo {
@@ -350,20 +352,28 @@ impl<D: KeyValueDB> ScheduledTask<D> {
     }
 
     pub async fn prepare_task(&mut self) -> Result<TransferStatus, CustodyServiceError> {
-        let previous_status = {
-            if self.depends_on.is_none() {
-                // first task is always ready
-                TransferStatus::Done
-            } else {
+        let previous_status = match self.depends_on.clone() {
+            Some(depends_on) => {
                 let previous_job = self.db.get(
                     CustodyDbColumn::JobsIndex.into(), 
-                    &self.depends_on.clone().unwrap()
+                    &depends_on.clone()
                 )
-                .map_err(|_| CustodyServiceError::DataBaseReadError)?.unwrap();
-    
-                let previous_job: JobShortInfo = serde_json::from_slice(&previous_job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
-                previous_job.status
-            }
+                .map_err(|_| CustodyServiceError::DataBaseReadError)?;
+
+                match previous_job {
+                    Some(previous_job) => {
+                        let previous_job: JobShortInfo = serde_json::from_slice(&previous_job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+                        previous_job.status
+                    },
+                    None => {
+                        self.update_status(TransferStatus::Failed(
+                            CustodyServiceError::InternalError("previous task not found".to_string())
+                        )).await?;
+                        return Ok(TransferStatus::Failed(CustodyServiceError::InternalError("previous task not found".to_string())));
+                    }
+                }
+            },
+            None => TransferStatus::Done
         };
 
         match previous_status {
