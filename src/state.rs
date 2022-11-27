@@ -34,6 +34,8 @@ pub enum SyncError {
     GeneralError(String),
     ContractException(web3::contract::Error),
     RpcNodeUnavailable,
+    Web3Error(web3::Error),
+    RequestTimeout(tokio::time::error::Elapsed),
 }
 
 impl From<std::io::Error> for SyncError {
@@ -45,6 +47,18 @@ impl From<std::io::Error> for SyncError {
 impl From<web3::contract::Error> for SyncError {
     fn from(e: web3::contract::Error) -> Self {
         SyncError::ContractException(e)
+    }
+}
+
+impl From<web3::Error> for SyncError {
+    fn from(e: web3::Error) -> Self {
+        SyncError::Web3Error(e)
+    }
+}
+
+impl From<tokio::time::error::Elapsed> for SyncError {
+    fn from(e: tokio::time::error::Elapsed) -> Self {
+        SyncError::RequestTimeout(e)
     }
 }
 
@@ -86,9 +100,7 @@ impl<D: 'static + KeyValueDB> State<D> {
             if !local_finalized_root.eq(&contract_root) {
 
                 let from_block = self.get_from_block();
-                let to_block = pool.block_number().await.map_err(|err| {
-                    SyncError::GeneralError(format!("failed to get block number: {}", err))
-                })?;
+                let to_block = pool.block_number().await?;
 
                 let batch_size = self.settings.web3.batch_size;
                 let mut start_block = from_block.as_u64();
