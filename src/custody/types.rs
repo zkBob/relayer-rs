@@ -112,6 +112,7 @@ pub struct HistoryTx {
     pub tx_hash: String,
     pub timestamp: u64,
     pub amount: u64,
+    pub fee: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -243,37 +244,33 @@ pub struct CustodyHistoryRecord {
 }
 
 impl CustodyHistoryRecord {
-    pub fn convert_vec(txs: Vec<HistoryTx>, fee: u64) -> Vec<Self> {
+    pub fn convert_vec(txs: Vec<HistoryTx>) -> Vec<Self> {
         txs.iter()
             .filter(|tx| tx.tx_type != HistoryTxType::AggregateNotes)
             .map(|tx| {
-                let total_fee = if tx.tx_type == HistoryTxType::TransferOut {
-                    Some(fee)
-                } else {
-                    None
-                };
+                let fee = (tx.tx_type != HistoryTxType::TransferIn).then(|| tx.fee);
+
                 match tx.transaction_id.clone() {
                     Some(request_id) => {
-                        let linked_tx_hashes = txs
+                        let linked_txs = txs
                             .iter()
                             .filter(|tx| tx.transaction_id == Some(request_id.clone()))
-                            .filter(|tx| tx.tx_type == HistoryTxType::AggregateNotes)
+                            .filter(|tx| tx.tx_type == HistoryTxType::AggregateNotes);
+                        
+                        let linked_tx_hashes = linked_txs
+                            .clone()
                             .map(|linked_tx| linked_tx.tx_hash.clone())
                             .collect::<Vec<_>>();
-                        let (linked_tx_hashes, total_fee) = {
-                            if linked_tx_hashes.len() > 0 {
-                                let linked_tx_count = linked_tx_hashes.len() as u64;
-                                (Some(linked_tx_hashes), Some(fee * (1 + linked_tx_count)))
-                            } else {
-                                (None, total_fee)
-                            }
-                        };
+
+                        let linked_tx_hashes = (!linked_tx_hashes.is_empty()).then(|| linked_tx_hashes);
+
+                        let fee = fee.map(|fee| fee + linked_txs.map(|tx| tx.fee).sum::<u64>());
 
                         CustodyHistoryRecord {
                             tx_type: tx.tx_type.clone(),
                             tx_hash: tx.tx_hash.clone(),
                             linked_tx_hashes,
-                            fee: total_fee,
+                            fee,
                             timestamp: tx.timestamp.clone(),
                             amount: tx.amount.clone(),
                             to: tx.to.clone(),
@@ -284,7 +281,7 @@ impl CustodyHistoryRecord {
                         tx_type: tx.tx_type.clone(),
                         tx_hash: tx.tx_hash.clone(),
                         linked_tx_hashes: None,
-                        fee: total_fee,
+                        fee,
                         timestamp: tx.timestamp.clone(),
                         amount: tx.amount.clone(),
                         to: tx.to.clone(),

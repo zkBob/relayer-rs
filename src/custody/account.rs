@@ -265,6 +265,7 @@ impl Account {
                 history.push(HistoryTx {
                     tx_hash: format!("{:#x}", tx.tx_hash),
                     amount,
+                    fee: calldata.memo.fee,
                     timestamp,
                     tx_type,
                     to,

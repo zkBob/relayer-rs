@@ -313,8 +313,6 @@ pub async fn history<D: KeyValueDB>(
 
     custody.sync_account(account_id, &state).await?;
 
-    let fee = state.settings.web3.relayer_fee;
-
     let account = custody.account(account_id)?;
     let txs = account
         .history(|nullifier: Vec<u8>| {
@@ -322,5 +320,5 @@ pub async fn history<D: KeyValueDB>(
         }, Some(&state.pool))
         .await;
 
-    Ok(HttpResponse::Ok().json(CustodyHistoryRecord::convert_vec(txs, fee)))
+    Ok(HttpResponse::Ok().json(CustodyHistoryRecord::convert_vec(txs)))
 }
