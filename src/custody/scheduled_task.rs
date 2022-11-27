@@ -26,24 +26,44 @@ pub enum TransferStatus {
     Failed(CustodyServiceError),
 }
 
-impl From<String> for TransferStatus {
-    fn from(val: String) -> Self {
-        match val.as_str() {
+impl TransferStatus {
+    pub fn from_relayer_response(status: String, failure_reason: Option<String>) -> Self {
+        match status.as_str() {
             "waiting" => Self::Relaying,
             "sent" => Self::Mining,
-            "reverted" => Self::Failed(CustodyServiceError::RelayerSendError), // TODO: fix error
             "completed" => Self::Done,
-            "failed" => Self::Failed(CustodyServiceError::RelayerSendError),
+            "reverted" => Self::Failed(
+                CustodyServiceError::TaskRejectedByRelayer(
+                    failure_reason.unwrap_or(Default::default())
+                )
+            ),
+            "failed" => Self::Failed(
+                CustodyServiceError::TaskRejectedByRelayer(
+                    failure_reason.unwrap_or(Default::default())
+                )
+            ),
             _ => Self::Failed(CustodyServiceError::RelayerSendError),
         }
     }
-}
 
-impl TransferStatus {
     pub fn is_final(&self) -> bool {
         match self {
             TransferStatus::Done | TransferStatus::Failed(_) => true,
             _ => false
+        }
+    }
+
+    pub fn status(&self) -> String {
+        match self {
+            Self::Failed(_) => "Failed".to_string(),
+            _ => format!("{:?}", self),
+        }
+    }
+
+    pub fn failure_reason(&self) -> Option<String> {
+        match self {
+            Self::Failed(err) => Some(err.to_string()),
+            _ => None,
         }
     }
 }
@@ -59,7 +79,6 @@ pub struct ScheduledTask<D:'static + KeyValueDB> {
     pub retries_left: u8,
     pub status: TransferStatus,
     pub tx_hash: Option<String>,
-    pub failure_reason: Option<String>,
     pub callback_address: Option<String>,
     pub params: Data<Parameters<Bn256>>,
     pub tx: Option<TransactionData<Fr>>,
@@ -84,8 +103,6 @@ impl<D: KeyValueDB> Debug for ScheduledTask<D> {
             .field("retries_left", &self.retries_left)
             .field("status", &self.status)
             .field("tx_hash", &self.tx_hash)
-            .field("failure_reason", &self.failure_reason)
-            
             .finish()
     }
 }
@@ -193,7 +210,10 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                     // transaction has been mined, set tx_hash and status
                     //TODO: call webhook on_complete
                     Some(tx_hash) => {
-                        let status = TransferStatus::from(relayer_response.status);
+                        let status = TransferStatus::from_relayer_response(
+                            relayer_response.status, 
+                            relayer_response.failure_reason,
+                        );
                         if status != self.status || self.tx_hash != Some(tx_hash.clone()) {
                             self.tx_hash = Some(tx_hash);
                             self.update_status(status.clone()).await.unwrap();
@@ -291,7 +311,6 @@ impl<D: KeyValueDB> ScheduledTask<D> {
         let job_status_info = JobShortInfo {
             status: status.clone(),
             tx_hash: self.tx_hash.clone(),
-            failure_reason: self.failure_reason.clone(),
             amount: self.amount.as_u64_amount(),
             fee: self.fee,
             to: self.to.clone(),

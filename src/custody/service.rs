@@ -304,9 +304,9 @@ impl CustodyService {
 
         // let retry_task = task.clone();
         let body = serde_json::to_vec(&TransactionStatusResponse {
-            status: task.status.clone(),
+            status: task.status.status(),
             tx_hash: task.tx_hash.clone(),
-            failure_reason: task.failure_reason.clone(),
+            failure_reason: task.status.failure_reason(),
         })
         .unwrap();
 

@@ -189,7 +189,6 @@ pub async fn transfer<D: KeyValueDB>(
             retries_left: 42,
             status: TransferStatus::New,
             tx_hash: None,
-            failure_reason: None,
             relayer_url: relayer_url.clone(),
             params: params.clone(),
             db: custody_db.clone(),
@@ -245,7 +244,7 @@ pub async fn fetch_tx_status(
 
     match serde_json::from_str::<JobResponse>(&body) {
         Ok(response) => Ok(TransactionStatusResponse {
-            status: TransferStatus::from(response.state),
+            status: response.state,
             tx_hash: response.tx_hash,
             failure_reason: response.failed_reason,
         }),

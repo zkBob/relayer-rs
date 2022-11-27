@@ -22,8 +22,6 @@ pub struct JobShortInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     pub timestamp: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failure_reason: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -149,7 +147,7 @@ pub struct TransferStatusRequest {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionStatusResponse {
-    pub status: TransferStatus,
+    pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,7 +157,7 @@ pub struct TransactionStatusResponse {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustodyTransactionStatusResponse {
-    pub status: TransferStatus,
+    pub status: String,
     pub timestamp: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
@@ -183,7 +181,7 @@ impl From<Vec<JobShortInfo>> for CustodyTransactionStatusResponse {
         let (status, timestamp, failure_reason) = {
             let last_job = jobs.last().unwrap();
             match last_job.status {
-                TransferStatus::Done => (TransferStatus::Done, last_job.timestamp, None),
+                TransferStatus::Done => (TransferStatus::Done.status(), last_job.timestamp, None),
                 TransferStatus::Failed(_) => {
                     let first_failed_job = jobs
                         .iter()
@@ -197,9 +195,9 @@ impl From<Vec<JobShortInfo>> for CustodyTransactionStatusResponse {
                         .clone();
 
                     (
-                        first_failed_job.status.clone(),
+                        first_failed_job.status.status(),
                         first_failed_job.timestamp,
-                        first_failed_job.failure_reason.clone(),
+                        first_failed_job.status.failure_reason(),
                     )
                 }
                 _ => {
@@ -208,7 +206,7 @@ impl From<Vec<JobShortInfo>> for CustodyTransactionStatusResponse {
                         .filter(|job| job.status != TransferStatus::Queued)
                         .last()
                         .unwrap();
-                    (TransferStatus::Relaying, relevant_job.timestamp, None)
+                    (TransferStatus::Relaying.status(), relevant_job.timestamp, None)
                 }
             }
         };
