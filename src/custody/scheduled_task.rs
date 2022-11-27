@@ -10,7 +10,7 @@ use tracing_futures::Instrument;
 use uuid::Uuid;
 use core::fmt::Debug;
 
-use crate::{custody::{routes::fetch_tx_status, service::JobStatusCallback, types::JobShortInfo}, types::{transaction_request::{TransactionRequest, Proof}, job::Response}, helpers::BytesRepr, state::State};
+use crate::{custody::{routes::fetch_tx_status, service::JobStatusCallback, types::JobShortInfo, helpers::AsU64Amount}, types::{transaction_request::{TransactionRequest, Proof}, job::Response}, helpers::BytesRepr, state::State};
 
 use super::{errors::CustodyServiceError, service::{CustodyDbColumn, CustodyService}, types::Fr};
 use memo_parser::memo::TxType as MemoTxType;
@@ -66,6 +66,7 @@ pub struct ScheduledTask<D:'static + KeyValueDB> {
     pub callback_sender: Data<Sender<JobStatusCallback>>,
     
     pub amount: Num<Fr>,
+    pub fee: u64,
     pub to: Option<String>,
     pub custody: Data<RwLock<CustodyService>>,
     pub state: Data<State<D>>,
@@ -291,7 +292,8 @@ impl<D: KeyValueDB> ScheduledTask<D> {
             status: status.clone(),
             tx_hash: self.tx_hash.clone(),
             failure_reason: self.failure_reason.clone(),
-            amount: self.amount.to_string(),
+            amount: self.amount.as_u64_amount(),
+            fee: self.fee,
             to: self.to.clone(),
             timestamp,
         };
@@ -356,8 +358,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                             let account = custody.account(self.account_id)?;
                             let account = account.inner.read().await;
         
-                            let fee: u64 = self.state.settings.web3.relayer_fee;
-                            let fee: Num<Fr> = Num::from_uint(NumRepr::from(fee)).unwrap();
+                            let fee: Num<Fr> = Num::from_uint(NumRepr::from(self.fee)).unwrap();
         
                             let tx_outputs = match &self.to {
                                 Some(to) => {

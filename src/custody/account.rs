@@ -106,21 +106,29 @@ impl Account {
 
     pub async fn short_info(&self, fee: u64) -> AccountShortInfo {
         let inner = self.inner.read().await;
-        let fee_as_num = Num::from_uint(NumRepr::from(fee)).unwrap();
-        let mut max_transfer_amount = inner.state.total_balance() - fee_as_num;        
-
-        loop {
-            match self
-                .get_tx_parts(max_transfer_amount.as_u64_amount(), fee, "".to_string())
-                .await
-            {
-                Err(CustodyServiceError::InsufficientBalance) => {
-                    max_transfer_amount -= fee_as_num;
-                    continue;
+        
+        let max_transfer_amount = {
+            let fee_as_num = Num::from_uint(NumRepr::from(fee)).unwrap();
+            let mut max_transfer_amount = inner.state.total_balance();        
+            loop {
+                match self
+                    .get_tx_parts(max_transfer_amount.as_u64_amount(), fee, "".to_string())
+                    .await
+                {
+                    Err(CustodyServiceError::InsufficientBalance) => {
+                        if max_transfer_amount.to_uint() > fee_as_num.to_uint() {
+                            max_transfer_amount -= fee_as_num;
+                            continue;
+                        } else {
+                            max_transfer_amount = Num::ZERO;
+                            break;
+                        }
+                    }
+                    _ => break,
                 }
-                _ => break,
             }
-        }
+            max_transfer_amount
+        };
 
         AccountShortInfo {
             id: self.id.to_string(),

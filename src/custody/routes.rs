@@ -197,6 +197,7 @@ pub async fn transfer<D: KeyValueDB>(
             callback_address: request.webhook.clone(),
             callback_sender: callback_sender.clone(),
             amount: amount.clone(),
+            fee,
             to: to.clone(),
             custody: custody_clone.clone(),
             state: state.clone(),

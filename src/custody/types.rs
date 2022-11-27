@@ -17,7 +17,8 @@ pub struct JobShortInfo {
     pub status: TransferStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
-    pub amount: String,
+    pub amount: u64,
+    pub fee: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     pub timestamp: u64,
@@ -177,11 +178,7 @@ impl From<Vec<JobShortInfo>> for CustodyTransactionStatusResponse {
             .collect::<Vec<_>>();
 
         let tx_hash = tx_hashes.pop();
-        let linked_tx_hashes = if tx_hash.is_some() {
-            Some(tx_hashes)
-        } else {
-            None
-        };
+        let linked_tx_hashes = tx_hash.is_some().then(|| tx_hashes);
 
         let (status, timestamp, failure_reason) = {
             let last_job = jobs.last().unwrap();
