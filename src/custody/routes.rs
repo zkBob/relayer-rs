@@ -46,7 +46,7 @@ pub async fn account_info<D: KeyValueDB>(
     custody.sync_account(account_id, &state).await?;
 
     let account_info = custody
-        .account_info(account_id)
+        .account_info(account_id, state.settings.web3.relayer_fee)
         .await
         .ok_or(CustodyServiceError::AccountNotFound)?;
 
@@ -106,11 +106,12 @@ pub async fn signup<D: KeyValueDB>(
 pub async fn list_accounts<D: KeyValueDB>(
     custody: Custody,
     bearer: BearerAuth,
+    state: Data<State<D>>
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
     custody.validate_token(bearer.token())?;
 
-    Ok(HttpResponse::Ok().json(custody.list_accounts().await))
+    Ok(HttpResponse::Ok().json(custody.list_accounts(state.settings.web3.relayer_fee).await))
 }
 
 pub async fn transfer<D: KeyValueDB>(
@@ -143,10 +144,41 @@ pub async fn transfer<D: KeyValueDB>(
     }
 
     let account = custody.account(account_id)?;
+    let last_account_task = account.last_task().await;
+    if let Some(task_key) = last_account_task {
+        let job = custody
+            .db
+            .get(
+                CustodyDbColumn::JobsIndex.into(),
+                &task_key,
+            )
+            .map_err(|_| CustodyServiceError::DataBaseReadError)?
+            .ok_or(CustodyServiceError::TransactionNotFound)?;
+        
+        let job: JobShortInfo = serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+        match job.status {
+            TransferStatus::Done => {
+                let txs = account
+                    .history(|nullifier: Vec<u8>| {
+                        custody.get_request_id(nullifier)
+                    }, None)
+                    .await;
+                let synced_tx = txs.iter().find(|tx| tx.tx_hash == job.tx_hash.clone().unwrap());
+                if synced_tx.is_none() {
+                    return Err(CustodyServiceError::AccountIsNotSynced);
+                }
+            }
+            TransferStatus::Failed(_) => (),
+            _ => {
+                return Err(CustodyServiceError::AccountIsBusy);
+            }
+        }
+    }
 
     let fee: u64 = state.settings.web3.relayer_fee;
 
     let tx_parts = account.get_tx_parts(request.amount, fee, request.to.clone()).await?;
+    let mut depends_on = None;
     for (i, (to, amount)) in tx_parts.iter().enumerate() {
         let mut task = ScheduledTask {
             request_id: request_id.clone(),
@@ -157,7 +189,6 @@ pub async fn transfer<D: KeyValueDB>(
             retries_left: 42,
             status: TransferStatus::New,
             tx_hash: None,
-            failure_reason: None,
             relayer_url: relayer_url.clone(),
             params: params.clone(),
             db: custody_db.clone(),
@@ -165,13 +196,20 @@ pub async fn transfer<D: KeyValueDB>(
             callback_address: request.webhook.clone(),
             callback_sender: callback_sender.clone(),
             amount: amount.clone(),
+            fee,
             to: to.clone(),
             custody: custody_clone.clone(),
             state: state.clone(),
+            depends_on,
         };
 
         let status = if i == 0 { TransferStatus::New } else { TransferStatus::Queued };
         task.update_status(status).await?;
+        
+        let task_key = task.task_key();
+        depends_on = Some(task_key.clone());
+        account.update_last_task(task_key).await;
+        
         prover_sender.send(task).await.unwrap();
     }
 
@@ -206,7 +244,7 @@ pub async fn fetch_tx_status(
 
     match serde_json::from_str::<JobResponse>(&body) {
         Ok(response) => Ok(TransactionStatusResponse {
-            status: TransferStatus::from(response.state),
+            status: response.state,
             tx_hash: response.tx_hash,
             failure_reason: response.failed_reason,
         }),
@@ -277,9 +315,9 @@ pub async fn history<D: KeyValueDB>(
 
     let account = custody.account(account_id)?;
     let txs = account
-        .history(&state.pool, |nullifier: Vec<u8>| {
+        .history(|nullifier: Vec<u8>| {
             custody.get_request_id(nullifier)
-        })
+        }, Some(&state.pool))
         .await;
 
     Ok(HttpResponse::Ok().json(CustodyHistoryRecord::convert_vec(txs)))

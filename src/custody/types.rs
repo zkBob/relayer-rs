@@ -1,13 +1,15 @@
 use crate::state::State;
 
-use ethabi::ethereum_types::{H256, U64};
+use ethabi::ethereum_types::{H256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use web3::types::LogWithMeta;
 
-use libzkbob_rs::{libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait}};
+use libzkbob_rs::libzeropool::native::params::{PoolBN256, PoolParams as PoolParamsTrait};
 
-use super::{tx_parser::DecMemo, scheduled_task::TransferStatus};
+use super::{scheduled_task::TransferStatus, tx_parser::DecMemo};
 
+pub type ContractEvent = LogWithMeta<(U256, H256, H256)>;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -15,36 +17,24 @@ pub struct JobShortInfo {
     pub status: TransferStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
-    pub amount: String,
+    pub amount: u64,
+    pub fee: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     pub timestamp: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failure_reason: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct AccountShortInfo {
     pub id: String,
     pub description: String,
-    pub balance: String,
-    pub single_tx_limit: String
-}
-
-#[derive(Serialize)]
-pub struct AccountDetailedInfo {
-    pub id: String,
-    pub description: String,
-    pub index: String,
-    pub sync_status: bool,
-    pub total_balance: String,
-    pub account_balance: String,
-    pub note_balance: String,
+    pub balance: u64,
+    pub max_transfer_amount: u64,
 }
 
 pub enum HistoryDbColumn {
     NotesIndex,
-    BlockTimestampsCache
+    BlockTimestampsCache,
 }
 
 impl Into<u32> for HistoryDbColumn {
@@ -75,7 +65,7 @@ pub struct AccountInfoRequest {
     pub id: String,
 }
 
-#[derive(Deserialize,Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferRequest {
     pub request_id: Option<String>,
@@ -119,8 +109,9 @@ pub enum HistoryTxType {
 pub struct HistoryTx {
     pub tx_type: HistoryTxType,
     pub tx_hash: String,
-    pub timestamp: String,
-    pub amount: String,
+    pub timestamp: u64,
+    pub amount: u64,
+    pub fee: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,9 +136,9 @@ pub struct TransferResponse {
 #[serde(rename_all = "camelCase")]
 pub struct CalculateFeeResponse {
     pub transaction_count: u64,
-    pub total_fee: u64
+    pub total_fee: u64,
 }
-#[derive(Deserialize,Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferStatusRequest {
     pub request_id: String,
@@ -156,7 +147,7 @@ pub struct TransferStatusRequest {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionStatusResponse {
-    pub status: TransferStatus,
+    pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -166,7 +157,7 @@ pub struct TransactionStatusResponse {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustodyTransactionStatusResponse {
-    pub status: TransferStatus,
+    pub status: String,
     pub timestamp: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
@@ -180,46 +171,42 @@ impl From<Vec<JobShortInfo>> for CustodyTransactionStatusResponse {
     fn from(jobs: Vec<JobShortInfo>) -> Self {
         let mut tx_hashes = jobs
             .iter()
-            .filter(|job| job.tx_hash.is_some())
+            .filter(|job| job.tx_hash.is_some() && job.status != TransferStatus::Mining)
             .map(|job| job.tx_hash.clone().unwrap())
             .collect::<Vec<_>>();
 
         let tx_hash = tx_hashes.pop();
-        let linked_tx_hashes = if tx_hash.is_some() {
-            Some(tx_hashes)
-        } else {
-            None
-        };
+        let linked_tx_hashes = tx_hash.is_some().then(|| tx_hashes);
 
         let (status, timestamp, failure_reason) = {
             let last_job = jobs.last().unwrap();
             match last_job.status {
-                TransferStatus::Done => (TransferStatus::Done, last_job.timestamp, None),
+                TransferStatus::Done => (TransferStatus::Done.status(), last_job.timestamp, None),
                 TransferStatus::Failed(_) => {
                     let first_failed_job = jobs
                         .iter()
-                        .filter(|job| {
-                            match job.status {
-                                TransferStatus::Failed(_) => true,
-                                _ => false
-                            }
+                        .filter(|job| match job.status {
+                            TransferStatus::Failed(_) => true,
+                            _ => false,
                         })
                         .collect::<Vec<_>>()
                         .first()
                         .unwrap()
                         .clone();
 
-                    (first_failed_job.status.clone(), first_failed_job.timestamp, first_failed_job.failure_reason.clone())
-                },
+                    (
+                        first_failed_job.status.status(),
+                        first_failed_job.timestamp,
+                        first_failed_job.status.failure_reason(),
+                    )
+                }
                 _ => {
                     let relevant_job = jobs
                         .iter()
-                        .filter(|job| {
-                            job.status != TransferStatus::Queued
-                        })
+                        .filter(|job| job.status != TransferStatus::Queued)
                         .last()
                         .unwrap();
-                    (TransferStatus::Relaying, relevant_job.timestamp, None)
+                    (TransferStatus::Relaying.status(), relevant_job.timestamp, None)
                 }
             }
         };
@@ -241,8 +228,10 @@ pub struct CustodyHistoryRecord {
     pub tx_hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linked_tx_hashes: Option<Vec<String>>,
-    pub timestamp: String,
-    pub amount: String,
+    pub timestamp: u64,
+    pub amount: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fee: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -251,42 +240,48 @@ pub struct CustodyHistoryRecord {
 
 impl CustodyHistoryRecord {
     pub fn convert_vec(txs: Vec<HistoryTx>) -> Vec<Self> {
-        txs
-            .iter()
+        txs.iter()
             .filter(|tx| tx.tx_type != HistoryTxType::AggregateNotes)
             .map(|tx| {
+                let fee = (tx.tx_type != HistoryTxType::TransferIn).then(|| tx.fee);
+
                 match tx.transaction_id.clone() {
                     Some(request_id) => {
-                        let linked_tx_hashes = txs
+                        let linked_txs = txs
                             .iter()
                             .filter(|tx| tx.transaction_id == Some(request_id.clone()))
-                            .filter(|tx| tx.tx_type == HistoryTxType::AggregateNotes)
-                            .map(|linked_tx| {
-                                linked_tx.tx_hash.clone()
-                            }).collect::<Vec<_>>();
-                        let linked_tx_hashes = if linked_tx_hashes.len() > 0 { Some(linked_tx_hashes) } else { None };
+                            .filter(|tx| tx.tx_type == HistoryTxType::AggregateNotes);
                         
+                        let linked_tx_hashes = linked_txs
+                            .clone()
+                            .map(|linked_tx| linked_tx.tx_hash.clone())
+                            .collect::<Vec<_>>();
+
+                        let linked_tx_hashes = (!linked_tx_hashes.is_empty()).then(|| linked_tx_hashes);
+
+                        let fee = fee.map(|fee| fee + linked_txs.map(|tx| tx.fee).sum::<u64>());
+
                         CustodyHistoryRecord {
                             tx_type: tx.tx_type.clone(),
                             tx_hash: tx.tx_hash.clone(),
                             linked_tx_hashes,
+                            fee,
                             timestamp: tx.timestamp.clone(),
                             amount: tx.amount.clone(),
                             to: tx.to.clone(),
                             transaction_id: Some(request_id),
                         }
                     }
-                    None => {
-                        CustodyHistoryRecord {
-                            tx_type: tx.tx_type.clone(),
-                            tx_hash: tx.tx_hash.clone(),
-                            linked_tx_hashes: None,
-                            timestamp: tx.timestamp.clone(),
-                            amount: tx.amount.clone(),
-                            to: tx.to.clone(),
-                            transaction_id: None,
-                        }
-                    }
+                    None => CustodyHistoryRecord {
+                        tx_type: tx.tx_type.clone(),
+                        tx_hash: tx.tx_hash.clone(),
+                        linked_tx_hashes: None,
+                        fee,
+                        timestamp: tx.timestamp.clone(),
+                        amount: tx.amount.clone(),
+                        to: tx.to.clone(),
+                        transaction_id: None,
+                    },
                 }
             })
             .collect::<Vec<_>>()

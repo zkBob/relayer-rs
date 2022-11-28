@@ -129,14 +129,21 @@ pub fn start_prover<D: KeyValueDB>(
 ) {
     tokio::task::spawn(async move {
         while let Some(mut task) = prover_receiver.recv().await {
-            match task.prepare_task().await.unwrap() {
-                TransferStatus::Failed(_) => continue,
-                TransferStatus::Proving => {},
-                TransferStatus::Queued => {
+            match task.prepare_task().await {
+                Ok(status) => match status {
+                    TransferStatus::Failed(_) => continue,
+                    TransferStatus::Proving => {},
+                    TransferStatus::Queued => {
+                        prover_sender.send(task).await.unwrap();
+                        continue;
+                    }
+                    _ => unreachable!(),
+                },
+                Err(err) => {
+                    tracing::error!("failed to prepare task: {}, task queued again", err);
                     prover_sender.send(task).await.unwrap();
                     continue;
                 }
-                _ => unreachable!(),
             };
 
             let status_sender = status_sender.clone();
@@ -152,7 +159,12 @@ pub fn start_prover<D: KeyValueDB>(
                         }
                         Err(e) => {
                             tracing::error!("error from prover: {:#?}", &e);
-                            task.update_status(TransferStatus::Failed(e)).await.unwrap();
+                            match task.update_status(TransferStatus::Failed(e)).await {
+                                Ok(_) => {},
+                                Err(err) => {
+                                    tracing::error!("failed to update task status: {}", err);
+                                }
+                            };
                         }
                     }
                 });
@@ -174,6 +186,9 @@ pub fn start_status_updater<D: KeyValueDB>(
                         tokio::time::sleep(Duration::from_secs(10)).await; //TODO: move to config
                         status_updater_sender.send(task).await.unwrap();
                     });
+                },
+                Err(err) => {
+                    tracing::error!("failed to fetch status: {}", err);
                 }
                 _ => (),
             };
@@ -251,9 +266,16 @@ impl CustodyService {
             let rt = tokio::runtime::Runtime::new().unwrap();
             loop {
                 rt.block_on(async {
-                    state.sync().instrument(tracing::debug_span!("Sync custody state...")).await.unwrap();
-                    let mut next_index = next_index_clone.write().await;
-                    *next_index = state.finalized.lock().await.next_index();
+                    let sync_result = state.sync().instrument(tracing::debug_span!("Sync custody state...")).await;
+                    match sync_result {
+                        Ok(_) => {
+                            let mut next_index = next_index_clone.write().await;
+                            *next_index = state.finalized.lock().await.next_index();
+                        },
+                        Err(err) => {
+                            tracing::warn!("failed to sync state with error: {:?}", err);
+                        }   
+                    }
                 });
                 thread::sleep(sync_interval);
             }
@@ -297,9 +319,9 @@ impl CustodyService {
 
         // let retry_task = task.clone();
         let body = serde_json::to_vec(&TransactionStatusResponse {
-            status: task.status.clone(),
+            status: task.status.status(),
             tx_hash: task.tx_hash.clone(),
-            failure_reason: task.failure_reason.clone(),
+            failure_reason: task.status.failure_reason(),
         })
         .unwrap();
 
@@ -378,22 +400,22 @@ impl CustodyService {
         Ok(tx_request)
     }
 
-    pub async fn account_info(&self, account_id: Uuid) -> Option<AccountShortInfo> {
+    pub async fn account_info(&self, account_id: Uuid, fee: u64) -> Option<AccountShortInfo> {
         match self
             .accounts
             .iter()
             .find(|account| account.id == account_id)
         {
-            Some(account) => Some(account.short_info().await),
+            Some(account) => Some(account.short_info(fee).await),
             None => None,
         }
     }
 
-    pub async fn list_accounts(&self) -> Vec<AccountShortInfo> {
+    pub async fn list_accounts(&self, fee: u64) -> Vec<AccountShortInfo> {
         let mut res: Vec<AccountShortInfo> = vec![];
 
         for account in self.accounts.iter() {
-            res.push(account.short_info().await);
+            res.push(account.short_info(fee).await);
         }
 
         res
@@ -514,7 +536,8 @@ impl CustodyService {
 
     pub fn task_keys(&self, request_id: &str) -> Result<Vec<Vec<u8>>, CustodyServiceError> {
         let count = self.db.get(CustodyDbColumn::TxRequestIndex.into(), request_id.as_bytes())
-            .map_err(|_| CustodyServiceError::DataBaseReadError)?.unwrap();
+            .map_err(|_| CustodyServiceError::DataBaseReadError)?
+            .ok_or(CustodyServiceError::TransactionNotFound)?;
         let count: u32 = u32::from_be_bytes(count.try_into().unwrap());
         Ok((0..count).map(|index| [request_id.as_bytes(), &index.to_be_bytes()].concat()).collect::<Vec<_>>())
     }

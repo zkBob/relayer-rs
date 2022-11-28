@@ -39,6 +39,10 @@ pub enum CustodyServiceError {
     PreviousTxFailed,
     #[error("insufficient balance")]
     InsufficientBalance,
+    #[error("account is busy")]
+    AccountIsBusy,
+    #[error("account is not synced yet")]
+    AccountIsNotSynced
 }
 
 impl ResponseError for CustodyServiceError {

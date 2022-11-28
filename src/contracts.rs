@@ -1,5 +1,5 @@
-use std::str::FromStr;
-
+use std::{str::FromStr, time::Duration};
+use tokio::time::timeout;
 use ethabi::ethereum_types::U64;
 use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::Num};
 use secp256k1::SecretKey;
@@ -18,6 +18,9 @@ use crate::{configuration::Web3Settings, state::SyncError};
 
 type MessageEvent = (U256, H256, Bytes);
 type Events = Vec<LogWithMeta<MessageEvent>>;
+
+// TODO: move it to config
+pub const TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct Pool {
     pub contract: Contract<Http>,
@@ -62,11 +65,14 @@ impl Pool {
         })
     }
 
-    pub async fn get_transaction(&self, tx_hash: H256) -> Result<Option<Transaction>, web3::Error> {
-        self.web3
-            .eth()
-            .transaction(TransactionId::Hash(tx_hash))
-            .await
+    pub async fn get_transaction(&self, tx_hash: H256) -> Result<Option<Transaction>, SyncError> {
+        let tx = timeout(
+            TIMEOUT, 
+            self.web3
+                .eth()
+                .transaction(TransactionId::Hash(tx_hash))
+        ).await??;
+        Ok(tx)
     }
 
     pub async fn get_transaction_receipt(
@@ -94,11 +100,11 @@ impl Pool {
     pub async fn root(&self) -> Result<(U256, Num<Fr>), SyncError> {
         let contract = &self.contract;
         let result = contract.query("pool_index", (), None, Options::default(), None);
-        let pool_index: U256 = result.await?;
+        let pool_index = timeout(TIMEOUT, result).await??;
 
         let result = contract.query("roots", (pool_index,), None, Options::default(), None);
 
-        let root: U256 = result.await?;
+        let root: U256 = timeout(TIMEOUT, result).await??;
 
         let root = Num::from_str(&root.to_string()).unwrap();
 
@@ -117,7 +123,7 @@ impl Pool {
             .contract
             .events("Message", from_block, to_block, block_hash, (), (), ());
 
-        let events: Events = result.await?;
+        let events: Events = timeout(TIMEOUT, result).await??;
 
         Ok(events)
     }
@@ -155,12 +161,6 @@ impl Pool {
             .await
             .unwrap();
 
-        // std::fs::write(
-        //     "tests/data/logs.json",
-        //     serde_json::to_string_pretty(&logs).unwrap(),
-        // )
-        // .unwrap();
-
         Ok(logs)
     }
 
@@ -189,8 +189,9 @@ impl Pool {
         Ok(block.timestamp)
     }
 
-    pub async fn block_number(&self) -> Result<U64, Web3Error> {
-        self.web3.eth().block_number().await
+    pub async fn block_number(&self) -> Result<U64, SyncError> {
+        let block_number = timeout(TIMEOUT, self.web3.eth().block_number()).await??;
+        Ok(block_number)
     }
 
     async fn gas_price(&self) -> Result<U256, Web3Error> {

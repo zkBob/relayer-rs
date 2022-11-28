@@ -1,8 +1,9 @@
-use ethabi::ethereum_types::{U64, U256};
+use ethabi::ethereum_types::{U256, U64};
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
 use libzeropool::fawkes_crypto::ff_uint::NumRepr;
 use libzeropool::fawkes_crypto::rand::Rng;
+use libzeropool::native::account::Account as NativeAccount;
 use libzeropool::POOL_PARAMS;
 use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
 use libzkbob_rs::address;
@@ -12,7 +13,6 @@ use libzkbob_rs::{
     merkle::MerkleTree,
     sparse_array::SparseArray,
 };
-use libzeropool::native::account::Account as NativeAccount;
 use memo_parser::memo::TxType;
 use memo_parser::memoparser;
 use std::fmt::Display;
@@ -25,8 +25,9 @@ use crate::contracts::Pool;
 use crate::custody::types::{HistoryTx, PoolParams};
 
 use super::errors::CustodyServiceError;
+use super::helpers::AsU64Amount;
 use super::tx_parser::StateUpdate;
-use super::types::{HistoryDbColumn, HistoryRecord, HistoryTxType, AccountShortInfo, Fr};
+use super::types::{AccountShortInfo, Fr, HistoryDbColumn, HistoryRecord, HistoryTxType};
 
 pub enum DataType {
     Tree,
@@ -55,10 +56,17 @@ pub struct Account {
     pub id: Uuid,
     pub description: String,
     pub history: kvdb_rocksdb::Database,
+
+    last_task_key: RwLock<Option<Vec<u8>>>,
 }
 
 impl Account {
-    pub async fn get_tx_parts(&self, total_amount: u64, fee: u64, to: String) -> Result<Vec<(Option<String>, Num<Fr>)>, CustodyServiceError> {
+    pub async fn get_tx_parts(
+        &self,
+        total_amount: u64,
+        fee: u64,
+        to: String,
+    ) -> Result<Vec<(Option<String>, Num<Fr>)>, CustodyServiceError> {
         let account = self.inner.read().await;
         let amount = Num::from_uint(NumRepr::from(total_amount)).unwrap();
         let fee = Num::from_uint(NumRepr::from(fee)).unwrap();
@@ -68,9 +76,9 @@ impl Account {
 
         if account_balance.to_uint() >= (amount + fee).to_uint() {
             parts.push((Some(to), amount));
-            return Ok(parts)
+            return Ok(parts);
         }
-        
+
         let notes = account.state.get_usable_notes();
         let mut balance_is_sufficient = false;
         for notes in notes.chunks(3) {
@@ -96,20 +104,37 @@ impl Account {
         Ok(parts)
     }
 
-    pub async fn short_info(&self) -> AccountShortInfo {
+    pub async fn short_info(&self, fee: u64) -> AccountShortInfo {
         let inner = self.inner.read().await;
-        let single_tx_limit = inner
-            .state
-            .get_usable_notes()
-            .iter()
-            .take(3)
-            .map(|(_, note)| note.b.as_num())
-            .fold(Num::ZERO, |acc, elem| acc + elem).to_string();
+        
+        let max_transfer_amount = {
+            let fee_as_num = Num::from_uint(NumRepr::from(fee)).unwrap();
+            let mut max_transfer_amount = inner.state.total_balance();        
+            loop {
+                match self
+                    .get_tx_parts(max_transfer_amount.as_u64_amount(), fee, "".to_string())
+                    .await
+                {
+                    Err(CustodyServiceError::InsufficientBalance) => {
+                        if max_transfer_amount.to_uint() > fee_as_num.to_uint() {
+                            max_transfer_amount -= fee_as_num;
+                            continue;
+                        } else {
+                            max_transfer_amount = Num::ZERO;
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            max_transfer_amount
+        };
+
         AccountShortInfo {
             id: self.id.to_string(),
             description: self.description.clone(),
-            balance: inner.state.total_balance().to_string(),
-            single_tx_limit
+            balance: inner.state.total_balance().as_u64_amount(),
+            max_transfer_amount: max_transfer_amount.as_u64_amount(),
         }
     }
 
@@ -151,7 +176,7 @@ impl Account {
         inner.generate_address()
     }
 
-    pub async fn history<F>(&self, pool: &Pool, get_transaction_id: F) -> Vec<HistoryTx>
+    pub async fn history<F>(&self, get_transaction_id: F, pool: Option<&Pool>) -> Vec<HistoryTx>
     where
         F: Fn(Vec<u8>) -> Result<String, String>,
     {
@@ -165,19 +190,15 @@ impl Account {
             let nullifier = calldata.nullifier;
 
             let history_records = match tx_type {
-                TxType::Deposit => vec![(
-                    HistoryTxType::Deposit,
-                    calldata.token_amount.to_string(),
-                    None,
-                )],
-                TxType::DepositPermittable => vec![(
-                    HistoryTxType::Deposit,
-                    calldata.token_amount.to_string(),
-                    None,
-                )],
+                TxType::Deposit => {
+                    vec![(HistoryTxType::Deposit, calldata.token_amount as u64, None)]
+                }
+                TxType::DepositPermittable => {
+                    vec![(HistoryTxType::Deposit, calldata.token_amount as u64, None)]
+                }
                 TxType::Transfer => {
                     let mut history_records = vec![];
-                    
+
                     if dec_memo.in_notes.len() == 0 && dec_memo.out_notes.len() == 0 {
                         let amount = {
                             let previous_amount = match last_account {
@@ -186,14 +207,14 @@ impl Account {
                             };
                             dec_memo.acc.unwrap().b.as_num() - previous_amount
                         };
-                        
+
                         history_records.push((
                             HistoryTxType::AggregateNotes,
-                            amount.to_string(),
-                            None
+                            amount.as_u64_amount(),
+                            None,
                         ))
                     }
-                    
+
                     for note in dec_memo.in_notes.iter() {
                         let loopback = dec_memo
                             .out_notes
@@ -211,7 +232,7 @@ impl Account {
 
                         history_records.push((
                             tx_type,
-                            note.note.b.to_num().to_string(),
+                            note.note.b.to_num().as_u64_amount(),
                             Some(address),
                         ))
                     }
@@ -228,7 +249,7 @@ impl Account {
                             address::format_address::<PoolParams>(note.note.d, note.note.p_d);
                         history_records.push((
                             HistoryTxType::TransferOut,
-                            note.note.b.to_num().to_string(),
+                            note.note.b.to_num().as_u64_amount(),
                             Some(address),
                         ))
                     }
@@ -236,19 +257,24 @@ impl Account {
                 }
                 TxType::Withdrawal => vec![(
                     HistoryTxType::Withdrawal,
-                    (-(calldata.memo.fee as i128 + calldata.token_amount)).to_string(),
+                    (-(calldata.memo.fee as i128 + calldata.token_amount)) as u64,
                     None,
                 )],
             };
 
             let transaction_id = get_transaction_id(nullifier).ok();
 
-            let timestamp = self.block_timestamp(pool, tx.block_num).await;
+            let timestamp = match pool {
+                Some(pool) => self.block_timestamp(pool, tx.block_num).await.as_u64(),
+                None => Default::default(),
+            };
+
             for (tx_type, amount, to) in history_records {
                 history.push(HistoryTx {
                     tx_hash: format!("{:#x}", tx.tx_hash),
                     amount,
-                    timestamp: timestamp.to_string(),
+                    fee: calldata.memo.fee,
+                    timestamp,
                     tx_type,
                     to,
                     transaction_id: transaction_id.clone(),
@@ -312,6 +338,7 @@ impl Account {
                 &data_file_path(base_path, id, DataType::History),
             )
             .unwrap(),
+            last_task_key: RwLock::new(None),
         }
     }
 
@@ -362,7 +389,18 @@ impl Account {
                 &data_file_path(base_path, id, DataType::History),
             )
             .unwrap(),
+            last_task_key: RwLock::new(None),
         })
+    }
+
+    pub async fn update_last_task(&self, task_key: Vec<u8>) {
+        let mut last_task = self.last_task_key.write().await;
+        *last_task = Some(task_key);
+    }
+
+    pub async fn last_task(&self) -> Option<Vec<u8>> {
+        let last_task_key = self.last_task_key.read().await;
+        last_task_key.clone()
     }
 
     async fn block_timestamp(&self, pool: &Pool, block_number: U64) -> U256 {

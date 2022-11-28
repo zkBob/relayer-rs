@@ -9,9 +9,11 @@ application:
 web3:
   provider_endpoint: http://host.docker.internal:8545
   pool_address: 0xe982E462b094850F12AF94d21D470e21bE9D0E9C
+  relayer_fee: 100000000
   credentials:
     secret_key: 6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c
 custody:
-  db_path: ./custody
+  db_path: ./data/custody
   relayer_url: http://host.docker.internal:8000
   sync_interval_sec: 5
+  admin_token: 12345
