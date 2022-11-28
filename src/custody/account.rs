@@ -27,7 +27,7 @@ use crate::custody::types::{HistoryTx, PoolParams};
 use super::errors::CustodyServiceError;
 use super::helpers::AsU64Amount;
 use super::tx_parser::StateUpdate;
-use super::types::{AccountShortInfo, Fr, HistoryDbColumn, HistoryRecord, HistoryTxType};
+use super::types::{AccountShortInfo, Fr, HistoryDbColumn, HistoryRecord, HistoryTxType, AccountAdminInfo};
 
 pub enum DataType {
     Tree,
@@ -135,6 +135,19 @@ impl Account {
             description: self.description.clone(),
             balance: inner.state.total_balance().as_u64_amount(),
             max_transfer_amount: max_transfer_amount.as_u64_amount(),
+        }
+    }
+
+    pub async fn admin_info(&self, fee: u64) -> AccountAdminInfo {
+        let short_info = self.short_info(fee).await;
+        let address = self.generate_address().await;
+        
+        AccountAdminInfo {
+            id: short_info.id,
+            description: short_info.description,
+            balance: short_info.balance,
+            max_transfer_amount: short_info.max_transfer_amount,
+            address,
         }
     }
 

@@ -111,7 +111,7 @@ pub async fn list_accounts<D: KeyValueDB>(
     let custody = custody.read().await;
     custody.validate_token(bearer.token())?;
 
-    Ok(HttpResponse::Ok().json(custody.list_accounts(state.settings.web3.relayer_fee).await))
+    Ok(HttpResponse::Ok().json(custody.list_accounts(state).await?))
 }
 
 pub async fn transfer<D: KeyValueDB>(

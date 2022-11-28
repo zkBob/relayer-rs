@@ -33,6 +33,15 @@ pub struct AccountShortInfo {
     pub max_transfer_amount: u64,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct AccountAdminInfo {
+    pub id: String,
+    pub description: String,
+    pub balance: u64,
+    pub max_transfer_amount: u64,
+    pub address: String,
+}
+
 pub enum HistoryDbColumn {
     NotesIndex,
     BlockTimestampsCache,

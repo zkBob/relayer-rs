@@ -33,7 +33,7 @@ use super::{
     config::CustodyServiceSettings,
     errors::CustodyServiceError,
     tx_parser::{self, IndexedTx, TxParser},
-    types::{AccountShortInfo, Fr, RelayerState, TransactionStatusResponse, JobShortInfo}, scheduled_task::{TransferStatus, ScheduledTask},
+    types::{AccountShortInfo, Fr, RelayerState, TransactionStatusResponse, JobShortInfo, AccountAdminInfo}, scheduled_task::{TransferStatus, ScheduledTask},
 };
 use libzkbob_rs::{
     client::{TokenAmount, TxType}
@@ -411,14 +411,17 @@ impl CustodyService {
         }
     }
 
-    pub async fn list_accounts(&self, fee: u64) -> Vec<AccountShortInfo> {
-        let mut res: Vec<AccountShortInfo> = vec![];
+    pub async fn list_accounts<D: KeyValueDB>(&self, state: Data<State<D>>) -> Result<Vec<AccountAdminInfo>, CustodyServiceError> {
+        let mut res: Vec<AccountAdminInfo> = vec![];
+        let fee = state.settings.web3.relayer_fee;
 
         for account in self.accounts.iter() {
-            res.push(account.short_info(fee).await);
+            self.sync_account(account.id, &state).await?;
+            let admin_info = account.admin_info(fee).await;
+            res.push(admin_info);
         }
 
-        res
+        Ok(res)
     }
 
     pub async fn sync_account<D: KeyValueDB>(
