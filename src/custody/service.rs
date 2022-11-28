@@ -289,13 +289,13 @@ impl CustodyService {
         }
     }
 
-    pub fn new_account(&mut self, description: String) -> Uuid {
+    pub fn new_account(&mut self, description: String, id: Option<Uuid>, sk: Option<String>) -> Result<Uuid, CustodyServiceError> {
         let base_path = format!("{}/accounts_data", self.settings.db_path);
-        let account = Account::new(&base_path, description);
+        let account = Account::new(&base_path, description, id, sk)?;
         let id = account.id;
         self.accounts.push(account);
         tracing::info!("created a new account: {}", id);
-        id
+        Ok(id)
     }
 
     pub async fn gen_address(&self, account_id: Uuid) -> Option<String> {

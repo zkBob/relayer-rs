@@ -1,3 +1,4 @@
+use borsh::BorshSerialize;
 use ethabi::ethereum_types::{U256, U64};
 use kvdb_rocksdb::DatabaseConfig;
 use libzeropool::fawkes_crypto::engines::bn256::Fs;
@@ -141,6 +142,7 @@ impl Account {
     pub async fn admin_info(&self, fee: u64) -> AccountAdminInfo {
         let short_info = self.short_info(fee).await;
         let address = self.generate_address().await;
+        let sk = hex::encode(self.sk().await.try_to_vec().unwrap());
         
         AccountAdminInfo {
             id: short_info.id,
@@ -148,6 +150,7 @@ impl Account {
             balance: short_info.balance,
             max_transfer_amount: short_info.max_transfer_amount,
             address,
+            sk,
         }
     }
 
@@ -301,8 +304,8 @@ impl Account {
         history
     }
 
-    pub fn new(base_path: &str, description: String) -> Self {
-        let id = uuid::Uuid::new_v4();
+    pub fn new(base_path: &str, description: String, id: Option<Uuid>, sk: Option<String>) -> Result<Self, CustodyServiceError> {
+        let id = id.unwrap_or(uuid::Uuid::new_v4());
         let state = State::new(
             MerkleTree::new_native(
                 Default::default(),
@@ -317,8 +320,19 @@ impl Account {
             .unwrap(),
         );
 
-        let mut rng = CustomRng;
-        let sk: [u8; 32] = rng.gen();
+        let sk: [u8; 32] = match sk {
+            Some(sk) => {
+                let sk = hex::decode(sk)
+                    .map_err(|err| CustodyServiceError::BadRequest(format!("failed to parse sk: {}", err)))?;
+                
+                sk.try_into()
+                    .map_err(|_| CustodyServiceError::BadRequest(format!("failed to parse sk")))?
+            }, 
+            None => {
+                let mut rng = CustomRng;
+                rng.gen()
+            }
+        };
 
         let account_db = kvdb_rocksdb::Database::open(
             &DatabaseConfig {
@@ -339,7 +353,7 @@ impl Account {
             .unwrap();
 
         let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
-        Self {
+        Ok(Self {
             inner: RwLock::new(user_account),
             id,
             description,
@@ -352,7 +366,7 @@ impl Account {
             )
             .unwrap(),
             last_task_key: RwLock::new(None),
-        }
+        })
     }
 
     pub fn load(base_path: &str, account_id: &str) -> Result<Self, String> {
