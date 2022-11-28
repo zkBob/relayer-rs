@@ -42,7 +42,9 @@ pub enum CustodyServiceError {
     #[error("account is busy")]
     AccountIsBusy,
     #[error("account is not synced yet")]
-    AccountIsNotSynced
+    AccountIsNotSynced,
+    #[error("service is busy")]
+    ServiceIsBusy,
 }
 
 impl ResponseError for CustodyServiceError {

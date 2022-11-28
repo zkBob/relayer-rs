@@ -131,7 +131,7 @@ pub async fn transfer<D: KeyValueDB>(
     })?;
 
     let custody_clone = custody.clone();
-    let custody = custody.read().await;
+    let custody = custody.write().await;
     let relayer_url = custody.settings.relayer_url.clone();
     custody.sync_account(account_id, &state).await?;
 
@@ -178,6 +178,10 @@ pub async fn transfer<D: KeyValueDB>(
     let fee: u64 = state.settings.web3.relayer_fee;
 
     let tx_parts = account.get_tx_parts(request.amount, fee, request.to.clone()).await?;
+    if prover_sender.capacity() - 1 < tx_parts.len() {
+        return Err(CustodyServiceError::ServiceIsBusy);
+    }
+
     let mut depends_on = None;
     for (i, (to, amount)) in tx_parts.iter().enumerate() {
         let mut task = ScheduledTask {
