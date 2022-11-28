@@ -14,6 +14,7 @@ pub type ContractEvent = LogWithMeta<(U256, H256, H256)>;
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct JobShortInfo {
+    pub request_id: String,
     pub status: TransferStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
