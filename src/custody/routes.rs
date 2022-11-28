@@ -179,7 +179,10 @@ pub async fn transfer<D: KeyValueDB>(
 
     let tx_parts = account.get_tx_parts(request.amount, fee, request.to.clone()).await?;
     let mut depends_on = None;
+    let tx_seq_len = tx_parts.len();
     for (i, (to, amount)) in tx_parts.iter().enumerate() {
+
+        let last_in_seq = i + 1 == tx_seq_len;
         let mut task = ScheduledTask {
             request_id: request_id.clone(),
             task_index: i as u32,
@@ -201,6 +204,7 @@ pub async fn transfer<D: KeyValueDB>(
             custody: custody_clone.clone(),
             state: state.clone(),
             depends_on,
+            last_in_seq
         };
 
         let status = if i == 0 { TransferStatus::New } else { TransferStatus::Queued };
@@ -213,7 +217,7 @@ pub async fn transfer<D: KeyValueDB>(
         prover_sender.send(task).await.unwrap();
     }
 
-    custody.save_tasks_count(&request_id, tx_parts.len() as u32)?;
+    custody.save_tasks_count(&request_id, tx_seq_len as u32)?;
 
     tracing::info!(
         "{} request received & saved, tx created and sent to the prover queue",
@@ -225,6 +229,18 @@ pub async fn transfer<D: KeyValueDB>(
     }))
 }
 
+
+pub async fn callback_mock(
+    callback: Json<JobShortInfo> ) -> Result <HttpResponse, CustodyServiceError>
+{
+    let callback: JobShortInfo = callback.0.into();
+
+    tracing::info!("received callback for request id {:}, new status {:?}",
+     callback.request_id, 
+    callback.status);
+
+    Ok(HttpResponse:: Ok().finish())
+}
 pub async fn fetch_tx_status(
     relayer_endpoint: &str,
 ) -> Result<TransactionStatusResponse, CustodyServiceError> {

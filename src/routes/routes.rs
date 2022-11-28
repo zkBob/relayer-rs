@@ -73,6 +73,7 @@ pub fn run<D: 'static + KeyValueDB>(
             .route("/transactionStatus", web::get().to(transaction_status::<D>))
             .route("/generateAddress", web::get().to(generate_shielded_address::<D>))
             .route("/history", web::get().to(history::<D>))
+            .route("/callback_mock", web::post().to(crate::custody::routes::callback_mock))
             .app_data(state.clone())
             .app_data(custody.clone())
             .app_data(params.clone())

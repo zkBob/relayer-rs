@@ -89,7 +89,8 @@ pub struct ScheduledTask<D:'static + KeyValueDB> {
     pub to: Option<String>,
     pub custody: Data<RwLock<CustodyService>>,
     pub state: Data<State<D>>,
-    pub depends_on: Option<Vec<u8>>
+    pub depends_on: Option<Vec<u8>>,
+    pub last_in_seq: bool
 }
 
 impl<D: KeyValueDB> Debug for ScheduledTask<D> {
@@ -311,6 +312,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
             .as_secs();
 
         let job_status_info = JobShortInfo {
+            request_id: self.request_id.clone(),
             status: status.clone(),
             tx_hash: self.tx_hash.clone(),
             amount: self.amount.as_u64_amount(),
@@ -332,20 +334,28 @@ impl<D: KeyValueDB> ScheduledTask<D> {
             .write(tx)
             .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))?;
 
-        if let Some(endpoint) = self.callback_address.clone() {
-            tracing::info!("trying to deliver callback");
-            let job_status_callback = JobStatusCallback {
-                request_id: self.request_id.clone(),
-                endpoint,
-                job_status_info,
-                retries_left: 42,
-                timestamp,
-            };
-
-            self.callback_sender
-                .send(job_status_callback)
-                .await
-                .unwrap();
+        if self.last_in_seq {
+            if let Some(endpoint) = self.callback_address.clone()  {
+                match status  {
+                    TransferStatus::Done | TransferStatus::Failed(_) => {
+                        tracing::info!("trying to deliver callback");
+                let job_status_callback = JobStatusCallback {
+                    request_id: self.request_id.clone(),
+                    endpoint,
+                    job_status_info,
+                    retries_left: 42,
+                    timestamp,
+                };
+    
+                self.callback_sender
+                    .send(job_status_callback)
+                    .await
+                    .unwrap();
+                    }
+                    _ => ()
+                }
+                
+            }
         }
 
         Ok(())
