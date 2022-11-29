@@ -64,15 +64,15 @@ async fn main() -> Result<(), std::io::Error> {
     tx_checker::start(&app.state);
 
     
-    app.state
-    .sync()
-    .instrument(tracing::debug_span!("state sync"))
-    .await
-    .map_err(|e| {
-        tracing::error!("sync failed:\n\t{:#?}", e);
-        e
-    })
-    .unwrap();
+    // app.state
+    // .sync()
+    // .instrument(tracing::debug_span!("state sync"))
+    // .await
+    // .map_err(|e| {
+    //     tracing::error!("sync failed:\n\t{:#?}", e);
+    //     e
+    // })
+    // .unwrap();
 
     app.run_untill_stopped().await
 }
