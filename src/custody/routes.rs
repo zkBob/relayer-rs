@@ -96,7 +96,16 @@ pub async fn signup<D: KeyValueDB>(
     let mut custody = custody.write().await;
     custody.validate_token(bearer.token())?;
 
-    let account_id = custody.new_account(request.0.description);
+    let id = match request.0.id {
+        Some(id) => {
+            Some(Uuid::from_str(&id).map_err(|_| {
+                CustodyServiceError::IncorrectAccountId
+            })?)
+        },
+        None => None
+    };
+    
+    let account_id = custody.new_account(request.0.description, id, request.0.sk)?;
 
     Ok(HttpResponse::Ok().json(SignupResponse {
         account_id: account_id.to_string(),
@@ -111,7 +120,7 @@ pub async fn list_accounts<D: KeyValueDB>(
     let custody = custody.read().await;
     custody.validate_token(bearer.token())?;
 
-    Ok(HttpResponse::Ok().json(custody.list_accounts(state.settings.web3.relayer_fee).await))
+    Ok(HttpResponse::Ok().json(custody.list_accounts(state).await?))
 }
 
 pub async fn transfer<D: KeyValueDB>(
