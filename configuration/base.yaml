@@ -14,6 +14,7 @@ application:
 web3:
   relayer_fee: 0
   provider_endpoint: http://localhost:8545
+  provider_timeout_sec: 180
   abi_path: ../configuration/pool-abi.json
   pool_address: c89ce4735882c9f0f0fe26686c53074e09b0d550
   gas_limit: 2000000

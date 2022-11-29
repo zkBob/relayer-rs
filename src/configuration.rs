@@ -88,6 +88,7 @@ pub struct Credentials {
 #[derive(Serialize,Deserialize,Clone,Debug)]
 pub struct Web3Settings {
     pub provider_endpoint: String,
+    pub provider_timeout_sec: u64,
     pub abi_path: String,
     pub pool_address: String,
     pub relayer_fee: u64,

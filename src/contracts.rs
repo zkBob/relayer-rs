@@ -19,9 +19,6 @@ use crate::{configuration::Web3Settings, state::SyncError};
 type MessageEvent = (U256, H256, Bytes);
 type Events = Vec<LogWithMeta<MessageEvent>>;
 
-// TODO: move it to config
-pub const TIMEOUT: Duration = Duration::from_secs(30);
-
 pub struct Pool {
     pub contract: Contract<Http>,
     web3: Web3<Http>,
@@ -29,6 +26,7 @@ pub struct Pool {
     key: SecretKey,
     gas_limit: U256,
     transact_short_signature: Vec<u8>,
+    timeout: Duration,
 }
 
 impl Pool {
@@ -62,12 +60,13 @@ impl Pool {
             key,
             gas_limit: U256::from(config.gas_limit),
             transact_short_signature: short_signature,
+            timeout: Duration::from_secs(config.provider_timeout_sec),
         })
     }
 
     pub async fn get_transaction(&self, tx_hash: H256) -> Result<Option<Transaction>, SyncError> {
         let tx = timeout(
-            TIMEOUT, 
+            self.timeout, 
             self.web3
                 .eth()
                 .transaction(TransactionId::Hash(tx_hash))
@@ -100,11 +99,11 @@ impl Pool {
     pub async fn root(&self) -> Result<(U256, Num<Fr>), SyncError> {
         let contract = &self.contract;
         let result = contract.query("pool_index", (), None, Options::default(), None);
-        let pool_index = timeout(TIMEOUT, result).await??;
+        let pool_index = timeout(self.timeout, result).await??;
 
         let result = contract.query("roots", (pool_index,), None, Options::default(), None);
 
-        let root: U256 = timeout(TIMEOUT, result).await??;
+        let root: U256 = timeout(self.timeout, result).await??;
 
         let root = Num::from_str(&root.to_string()).unwrap();
 
@@ -123,7 +122,7 @@ impl Pool {
             .contract
             .events("Message", from_block, to_block, block_hash, (), (), ());
 
-        let events: Events = timeout(TIMEOUT, result).await??;
+        let events: Events = timeout(self.timeout, result).await??;
 
         Ok(events)
     }
@@ -190,7 +189,7 @@ impl Pool {
     }
 
     pub async fn block_number(&self) -> Result<U64, SyncError> {
-        let block_number = timeout(TIMEOUT, self.web3.eth().block_number()).await??;
+        let block_number = timeout(self.timeout, self.web3.eth().block_number()).await??;
         Ok(block_number)
     }
 
