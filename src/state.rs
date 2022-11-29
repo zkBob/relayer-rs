@@ -105,7 +105,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                 let batch_size = self.settings.web3.batch_size;
                 let mut start_block = from_block.as_u64();
                 let finish_block = to_block.as_u64();
-                let mut batch_end_block = start_block + batch_size;
+                let mut batch_end_block = min(start_block + batch_size, finish_block) ;
                 tracing::info!(
                     "starting sync from  block  #{} to block #{}",
                     start_block,
