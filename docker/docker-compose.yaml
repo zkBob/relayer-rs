@@ -4,15 +4,24 @@ services:
   zkbob-cloud:
     image: zkbob-cloud:latest
     container_name: zkbob-cloud
-    volumes: 
+    volumes:
       - ../params:/app/params/
-      - ../configuration/staging.yaml:/app/configuration/staging.yaml
+      - ../configuration:/app/configuration
       - ../data:/app/data
     environment:
-      APP_ENVIRONMENT: 'staging'
-      RUST_LOG: "info"
+      APP_ENVIRONMENT: $APP_ENVIRONMENT
+      RUST_LOG: $RUST_LOG
       RUST_BACKTRACE: 1
     ports:
       - 8001:8001
+      - 80:80
     extra_hosts:
       - "host.docker.internal:host-gateway"
+  # logs:
+  #   image: jaeger_tracing:latest
+  #   container_name: logs
+  #   ports:
+  #     - 16686:16686
+  #     - 14268:14268
+  #     - 6831:6831/udp
+  #     - 6832:6832/udp

@@ -226,18 +226,19 @@ impl<D: 'static + KeyValueDB> State<D> {
                         }
                     }
 
-                    start_block = batch_end_block;
-                    batch_end_block = min(batch_end_block + batch_size, finish_block);
-
-                    tracing::debug!("saving last block  to db:  {}", batch_end_block);
-                    self.save_last_block(batch_end_block)?;
-
                     tracing::debug!(
                         "batch {} - {} new next index:  {}",
                         start_block,
                         batch_end_block,
                         finalized.next_index(),
                     );
+                    tracing::debug!("saving last block  to db:  {}", batch_end_block);
+                    self.save_last_block(batch_end_block)?;
+
+                    start_block = batch_end_block;
+                    batch_end_block = min(batch_end_block + batch_size, finish_block);
+
+                    
                 }
                 tracing::info!(
                     "relayer sync finish\nlocal:   {} | {},\ncontract:{} | {}",
