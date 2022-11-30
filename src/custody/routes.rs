@@ -291,22 +291,7 @@ pub async fn transaction_status<D: KeyValueDB>(
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
 
-    let task_keys = custody.task_keys(&request.0.request_id)?;
-    let mut jobs = vec![];
-    for task_key in task_keys {
-        let job = custody
-            .db
-            .get(
-                CustodyDbColumn::JobsIndex.into(),
-                &task_key,
-            )
-            .map_err(|_| CustodyServiceError::DataBaseReadError)?
-            .ok_or(CustodyServiceError::TransactionNotFound)?;
-
-        let job: JobShortInfo =
-            serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
-        jobs.push(job);
-    }
+    let jobs = custody.get_jobs(&request.request_id)?;
 
     Ok(HttpResponse::Ok().json(CustodyTransactionStatusResponse::from(jobs)))
 }

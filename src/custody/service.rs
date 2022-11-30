@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use tracing_futures::Instrument;
 use std::{
     fs, thread,
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
     u64
 };
 use tokio::sync::{mpsc::{Receiver, Sender}, RwLock};
@@ -200,7 +200,8 @@ pub struct CustodyService {
     pub settings: CustodyServiceSettings,
     pub accounts: Vec<Account>,
     pub db: Data<kvdb_rocksdb::Database>,
-    next_index: Data<RwLock<u64>>
+    next_index: Data<RwLock<u64>>,
+    start_timestamp: u64,
 }
 
 impl CustodyService {
@@ -281,11 +282,17 @@ impl CustodyService {
             }
         });
 
+        let start_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         Self {
             accounts,
             settings,
             db,
             next_index,
+            start_timestamp,
         }
     }
 
@@ -543,6 +550,63 @@ impl CustodyService {
             .ok_or(CustodyServiceError::TransactionNotFound)?;
         let count: u32 = u32::from_be_bytes(count.try_into().unwrap());
         Ok((0..count).map(|index| [request_id.as_bytes(), &index.to_be_bytes()].concat()).collect::<Vec<_>>())
+    }
+
+    pub fn get_jobs(&self, request_id: &str) -> Result<Vec<JobShortInfo>, CustodyServiceError> {
+        let task_keys = self.task_keys(&request_id)?;
+        let mut jobs = vec![];
+        for task_key in task_keys {
+            let job = self
+                .db
+                .get(
+                    CustodyDbColumn::JobsIndex.into(),
+                    &task_key,
+                )
+                .map_err(|_| CustodyServiceError::DataBaseReadError)?
+                .ok_or(CustodyServiceError::TransactionNotFound)?;
+
+            let mut job: JobShortInfo =
+                serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+            
+            // TODO: workaround before persistent channels implementation
+            match job.status {
+                TransferStatus::Done | TransferStatus::Failed(_) => (),
+                _ => {
+                    if job.timestamp < self.start_timestamp {
+                        job.status = match job.status {
+                            TransferStatus::Relaying | TransferStatus::Mining => {
+                                TransferStatus::Failed(CustodyServiceError::TransactionStatusUnknown)
+                            },
+                            _ => {
+                                TransferStatus::Failed(CustodyServiceError::TransactionExpired)
+                            }
+                        };
+
+                        job.timestamp = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map_err(|err| {
+                                CustodyServiceError::InternalError(err.to_string())
+                            })?
+                            .as_secs();
+                        
+                        self.db.write({
+                            let mut tx = self.db.transaction();
+                            tx.put(
+                                CustodyDbColumn::JobsIndex.into(),
+                                &task_key,
+                                &serde_json::to_vec(&job).unwrap(),
+                            );
+                            tx
+                        })
+                        .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))?;
+                    }
+                },
+            };
+
+            jobs.push(job);
+        }
+
+        Ok(jobs)
     }
 }
 
