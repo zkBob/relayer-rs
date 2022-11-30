@@ -9,6 +9,7 @@ use crate::{
     },
 };
 use actix_web::web::Data;
+use borsh::BorshSerialize;
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::{Database, DatabaseConfig};
 use libzeropool::fawkes_crypto::ff_uint::NumRepr;
@@ -429,6 +430,30 @@ impl CustodyService {
         }
 
         Ok(res)
+    }
+
+    pub async fn reset_account(
+        &mut self,
+        account_id: Uuid,
+    ) -> Result<(), CustodyServiceError> {
+        let base_path = format!("{}/accounts_data", self.settings.db_path);
+        let (index, sk, description) = {
+            let (index, account) = self.accounts
+                .iter()
+                .enumerate()
+                .find(|(_, account)| account.id == account_id)
+                .ok_or(CustodyServiceError::AccountNotFound)?;
+            let sk = hex::encode(account.sk().await.try_to_vec().unwrap());
+            (index, sk, account.description.clone())
+        };
+        self.accounts.remove(index);
+
+        fs::remove_dir_all(format!("{}/{}", base_path, account_id.to_string()))
+                .map_err(|err| CustodyServiceError::InternalError(err.to_string()))?;
+
+        self.new_account(description, Some(account_id), Some(sk))?;
+
+        Ok(())
     }
 
     pub async fn sync_account<D: KeyValueDB>(

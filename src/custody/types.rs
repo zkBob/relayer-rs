@@ -310,6 +310,13 @@ pub struct CalculateFeeRequest {
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateStartBlockRequest {
+pub struct StateRollbackRequest {
     pub start_block: u64,
+    pub pool_index: u64,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetAccountRequest {
+    pub id: String,
 }
