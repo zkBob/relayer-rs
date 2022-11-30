@@ -25,7 +25,7 @@ use super::{
     types::{
         AccountInfoRequest, CalculateFeeResponse, GenerateAddressResponse, JobShortInfo,
         SignupRequest, SignupResponse, TransactionStatusResponse, TransferRequest,
-        TransferStatusRequest, CustodyTransactionStatusResponse, CustodyHistoryRecord, CalculateFeeRequest,
+        TransferStatusRequest, CustodyTransactionStatusResponse, CustodyHistoryRecord, CalculateFeeRequest, UpdateStartBlockRequest,
     }, scheduled_task::ScheduledTask,
 };
 
@@ -335,4 +335,19 @@ pub async fn history<D: KeyValueDB>(
         .await;
 
     Ok(HttpResponse::Ok().json(CustodyHistoryRecord::convert_vec(txs)))
+}
+
+pub async fn update_start_block<D: KeyValueDB>(
+    request: Json<UpdateStartBlockRequest>,
+    state: Data<State<D>>,
+    custody: Custody,
+    bearer: BearerAuth,
+) -> Result<HttpResponse, CustodyServiceError> {
+    let custody = custody.write().await;
+    custody.validate_token(bearer.token())?;
+
+    let _finalized = state.finalized.lock().await;
+    state.save_last_block(request.start_block)
+        .map_err(|_| CustodyServiceError::InternalError(format!("failed to update start block")))?;
+    Ok(HttpResponse::Ok().finish())
 }

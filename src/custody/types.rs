@@ -307,3 +307,9 @@ pub struct CalculateFeeRequest {
     pub account_id: String,
     pub amount: u64,
 }
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStartBlockRequest {
+    pub start_block: u64,
+}
