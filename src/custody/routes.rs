@@ -5,9 +5,9 @@ use actix_web::{
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
-use libzeropool::fawkes_crypto::{
+use libzeropool::{fawkes_crypto::{
     backend::bellman_groth16::{engines::Bn256, Parameters},
-};
+}, constants::OUT};
 
 use std::str::FromStr;
 use tokio::sync::{mpsc::Sender, RwLock};
@@ -356,7 +356,7 @@ pub async fn rollback_state<D: KeyValueDB>(
     pending.rollback(request.pool_index);
     
     let mut tx = state.jobs.transaction();
-    for index in request.pool_index..last_index {
+    for index in (request.pool_index..last_index).step_by(OUT + 1) {
         let job_id = state.jobs.get(JobsDbColumn::JobsIndex as u32, &index.to_be_bytes())
             .map_err(|_| CustodyServiceError::DataBaseReadError)?;
         if job_id.is_none() {

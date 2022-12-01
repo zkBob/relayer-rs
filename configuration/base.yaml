@@ -21,6 +21,7 @@ web3:
   scheduler_interval_sec: 5
   trm_endpoint: http://localhost:8081/wallet_screening
   start_block: 
+  rollback_step: 5
   batch_size: 3000
   credentials:
       secret_key: 6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c
