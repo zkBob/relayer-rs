@@ -45,6 +45,10 @@ pub enum CustodyServiceError {
     AccountIsNotSynced,
     #[error("service is busy")]
     ServiceIsBusy,
+    #[error("transaction expired")]
+    TransactionExpired,
+    #[error("transaction status is unknown")]
+    TransactionStatusUnknown,
 }
 
 impl ResponseError for CustodyServiceError {

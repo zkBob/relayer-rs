@@ -5,7 +5,6 @@ use relayer_rs::{
     tx_checker, tx_sender, types::job::Job,
     telemetry::setup_telemetry,
 };
-use tracing::Instrument;
 
 use libzeropool::POOL_PARAMS;
 use libzkbob_rs::merkle::MerkleTree;

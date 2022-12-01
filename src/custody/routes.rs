@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::{
     custody::{types::TransferResponse, scheduled_task::TransferStatus},
     routes::job::JobResponse,
-    state::State,
+    state::{State, JobsDbColumn},
 };
 
 use super::{
@@ -25,7 +25,7 @@ use super::{
     types::{
         AccountInfoRequest, CalculateFeeResponse, GenerateAddressResponse, JobShortInfo,
         SignupRequest, SignupResponse, TransactionStatusResponse, TransferRequest,
-        TransferStatusRequest, CustodyTransactionStatusResponse, CustodyHistoryRecord, CalculateFeeRequest,
+        TransferStatusRequest, CustodyTransactionStatusResponse, CustodyHistoryRecord, CalculateFeeRequest, ResetAccountRequest, StateRollbackRequest,
     }, scheduled_task::ScheduledTask,
 };
 
@@ -291,22 +291,7 @@ pub async fn transaction_status<D: KeyValueDB>(
 ) -> Result<HttpResponse, CustodyServiceError> {
     let custody = custody.read().await;
 
-    let task_keys = custody.task_keys(&request.0.request_id)?;
-    let mut jobs = vec![];
-    for task_key in task_keys {
-        let job = custody
-            .db
-            .get(
-                CustodyDbColumn::JobsIndex.into(),
-                &task_key,
-            )
-            .map_err(|_| CustodyServiceError::DataBaseReadError)?
-            .ok_or(CustodyServiceError::TransactionNotFound)?;
-
-        let job: JobShortInfo =
-            serde_json::from_slice(&job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
-        jobs.push(job);
-    }
+    let jobs = custody.get_jobs(&request.request_id)?;
 
     Ok(HttpResponse::Ok().json(CustodyTransactionStatusResponse::from(jobs)))
 }
@@ -350,4 +335,66 @@ pub async fn history<D: KeyValueDB>(
         .await;
 
     Ok(HttpResponse::Ok().json(CustodyHistoryRecord::convert_vec(txs)))
+}
+
+pub async fn rollback_state<D: KeyValueDB>(
+    request: Json<StateRollbackRequest>,
+    state: Data<State<D>>,
+    custody: Custody,
+    bearer: BearerAuth,
+) -> Result<HttpResponse, CustodyServiceError> {
+    let custody = custody.write().await;
+    custody.validate_token(bearer.token())?;
+
+    let mut finalized = state.finalized.lock().await;
+    let mut pending = state.pending.lock().await;
+    state.save_last_block(request.start_block)
+        .map_err(|_| CustodyServiceError::InternalError(format!("failed to update start block")))?;
+
+    let last_index = finalized.next_index();
+    finalized.rollback(request.pool_index);
+    pending.rollback(request.pool_index);
+    
+    let mut tx = state.jobs.transaction();
+    for index in request.pool_index..last_index {
+        let job_id = state.jobs.get(JobsDbColumn::JobsIndex as u32, &index.to_be_bytes())
+            .map_err(|_| CustodyServiceError::DataBaseReadError)?;
+        if job_id.is_none() {
+            continue;
+        }
+        let job_id = job_id.unwrap();
+
+        tx.delete(JobsDbColumn::JobsIndex as u32, &index.to_be_bytes());
+       
+
+        let job = state.jobs.get(JobsDbColumn::Jobs as u32, &job_id)
+            .map_err(|_| CustodyServiceError::DataBaseReadError)?;
+        if job.is_none() {
+            continue;
+        }
+
+        tx.delete(JobsDbColumn::Jobs as u32, &job_id);
+    }
+    state.jobs.write(tx)
+        .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))?;
+    
+    Ok(HttpResponse::Ok().finish())
+}
+
+pub async fn reset_account(
+    request: Json<ResetAccountRequest>,
+    custody: Custody,
+    bearer: BearerAuth,
+) -> Result<HttpResponse, CustodyServiceError> {
+    let mut custody = custody.write().await;
+    custody.validate_token(bearer.token())?;
+
+    let account_id = Uuid::from_str(&request.id).map_err(|err| {
+        tracing::error!("failed to parse account id: {}", err);
+        CustodyServiceError::IncorrectAccountId
+    })?;
+
+    custody.reset_account(account_id).await?;
+
+    Ok(HttpResponse::Ok().finish())
 }

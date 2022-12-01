@@ -327,7 +327,7 @@ impl<D: 'static + KeyValueDB> State<D> {
             )
     }
 
-    fn save_last_block(&self, to_block: u64) -> Result<(), SyncError> {
+    pub fn save_last_block(&self, to_block: u64) -> Result<(), SyncError> {
         self.jobs
             .write({
                 let mut tx = self.jobs.transaction();
