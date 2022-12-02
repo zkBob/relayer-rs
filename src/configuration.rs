@@ -97,6 +97,7 @@ pub struct Web3Settings {
     pub credentials: Credentials,
     pub scheduler_interval_sec: u64,
     pub start_block: Option<u64>,
+    pub rollback_step: u64,
     pub batch_size: u64
 }
 

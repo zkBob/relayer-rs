@@ -103,7 +103,8 @@ impl<D: 'static + KeyValueDB> State<D> {
                 let to_block = pool.block_number().await?;
 
                 let batch_size = self.settings.web3.batch_size;
-                let mut start_block = from_block.as_u64();
+                let initial_block = from_block.as_u64();
+                let mut start_block = initial_block;
                 let finish_block = to_block.as_u64();
                 let mut batch_end_block = min(start_block + batch_size, finish_block) ;
                 tracing::info!(
@@ -237,16 +238,72 @@ impl<D: 'static + KeyValueDB> State<D> {
 
                     start_block = batch_end_block;
                     batch_end_block = min(batch_end_block + batch_size, finish_block);
-
-                    
                 }
+
+                let (local_index, local_root) = (finalized.next_index(), finalized.get_root());
+
                 tracing::info!(
                     "relayer sync finish\nlocal:   {} | {},\ncontract:{} | {}",
-                    finalized.next_index(),
-                    finalized.get_root().to_string(),
+                    local_index,
+                    local_root,
                     contract_index,
                     contract_root
                 );
+
+                if local_index < contract_index.as_u64() {
+                    tracing::warn!("some event was probably skipped, start block will be decreased");
+                    let last_block = initial_block.saturating_sub(batch_size);
+                    self.save_last_block(last_block)?;
+                    return Err(SyncError::GeneralError("index mismatch".to_string()))
+                }
+
+                if local_index == contract_index.as_u64() && local_root != contract_root {
+                    let rollback_count = self.get_rollback_count() + self.settings.web3.rollback_step;
+                    let rollback_index = local_index.saturating_sub(rollback_count * (OUT + 1) as u64);
+
+                    tracing::error!("root mismatch, rollback to: {}", rollback_index);
+
+                    let job_id = self.jobs
+                        .get(JobsDbColumn::JobsIndex as u32, &rollback_index.to_be_bytes())
+                        .map_err(|_| SyncError::GeneralError("data base read error".to_string()))?;
+                    if job_id.is_none() {
+                        let last_block = initial_block.saturating_sub(batch_size);
+                        self.save_last_block(last_block)?;
+                    } else {
+                        self.save_last_block(initial_block)?;
+                    }
+
+                    finalized.rollback(rollback_index);
+                    pending.rollback(rollback_index);
+
+                    let mut tx = self.jobs.transaction();
+                    for index in (rollback_index..local_index).step_by(OUT + 1) {
+                        let job_id = self.jobs.get(JobsDbColumn::JobsIndex as u32, &index.to_be_bytes())
+                            .map_err(|_| SyncError::GeneralError("data base read error".to_string()))?;
+                        if job_id.is_none() {
+                            continue;
+                        }
+                        let job_id = job_id.unwrap();
+
+                        tx.delete(JobsDbColumn::JobsIndex as u32, &index.to_be_bytes());
+                    
+
+                        let job = self.jobs.get(JobsDbColumn::Jobs as u32, &job_id)
+                            .map_err(|_| SyncError::GeneralError("data base read error".to_string()))?;
+                        if job.is_none() {
+                            continue;
+                        }
+
+                        tx.delete(JobsDbColumn::Jobs as u32, &job_id);
+                    }
+                    self.jobs.write(tx)?;
+
+                    self.save_rollback_count(rollback_count)?;
+
+                    return Err(SyncError::GeneralError("root mismatch".to_string()))
+                }
+
+                self.save_rollback_count(0)?;
             }
         }
 
@@ -337,5 +394,30 @@ impl<D: 'static + KeyValueDB> State<D> {
             .map_err(|err| {
                 SyncError::GeneralError(format!("failed to save last synced block: {:?}", err))
             })
+    }
+
+    fn save_rollback_count(&self, rollback_count: u64) -> Result<(), SyncError> {
+        self.jobs
+            .write({
+                let mut tx = self.jobs.transaction();
+                tx.put(JobsDbColumn::SyncedBlockIndex as u32, "rollback_count".as_bytes(), &rollback_count.to_be_bytes());
+                tx
+            })
+            .map_err(|err| {
+                SyncError::GeneralError(format!("failed to save rollback count: {:?}", err))
+            })
+    }
+
+    fn get_rollback_count(&self) -> u64 {
+        self
+            .jobs
+            .get(
+                JobsDbColumn::SyncedBlockIndex as u32,
+                "rollback_count".as_bytes(),
+            )
+            .ok()
+            .flatten()
+            .map(|rollback_count| u64::from_be_bytes(rollback_count.try_into().unwrap()))
+            .unwrap_or(0)
     }
 }
