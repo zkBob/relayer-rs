@@ -1,18 +1,39 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use actix_web::web::Data;
+use core::fmt::Debug;
 use kvdb::KeyValueDB;
-use libzeropool::fawkes_crypto::{backend::bellman_groth16::{Parameters, engines::Bn256}, ff_uint::{Num, NumRepr}};
-use libzkbob_rs::{proof::prove_tx, client::{TransactionData, TxOutput, TokenAmount, TxType}};
-use serde::{Serialize, Deserialize};
+use libzeropool::fawkes_crypto::{
+    backend::bellman_groth16::{engines::Bn256, Parameters},
+    ff_uint::{Num, NumRepr},
+};
+use libzkbob_rs::{
+    client::{TokenAmount, TransactionData, TxOutput, TxType},
+    proof::prove_tx,
+};
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, RwLock};
 use tracing_futures::Instrument;
 use uuid::Uuid;
-use core::fmt::Debug;
 
-use crate::{custody::{routes::fetch_tx_status, service::JobStatusCallback, types::JobShortInfo, helpers::AsU64Amount}, types::{transaction_request::{TransactionRequest, Proof}, job::Response}, helpers::BytesRepr, state::State};
+use crate::{
+    custody::{
+        helpers::AsU64Amount, routes::fetch_tx_status, service::JobStatusCallback,
+        types::JobShortInfo,
+    },
+    helpers::BytesRepr,
+    state::State,
+    types::{
+        job::Response,
+        transaction_request::{Proof, TransactionRequest},
+    },
+};
 
-use super::{errors::CustodyServiceError, service::{CustodyDbColumn, CustodyService}, types::Fr};
+use super::{
+    errors::CustodyServiceError,
+    service::{CustodyDbColumn, CustodyService},
+    types::Fr,
+};
 use memo_parser::memo::TxType as MemoTxType;
 
 use std::panic::{self, AssertUnwindSafe};
@@ -34,16 +55,12 @@ impl TransferStatus {
             "waiting" => Self::Relaying,
             "sent" => Self::Mining,
             "completed" => Self::Done,
-            "reverted" => Self::Failed(
-                CustodyServiceError::TaskRejectedByRelayer(
-                    failure_reason.unwrap_or(Default::default())
-                )
-            ),
-            "failed" => Self::Failed(
-                CustodyServiceError::TaskRejectedByRelayer(
-                    failure_reason.unwrap_or(Default::default())
-                )
-            ),
+            "reverted" => Self::Failed(CustodyServiceError::TaskRejectedByRelayer(
+                failure_reason.unwrap_or(Default::default()),
+            )),
+            "failed" => Self::Failed(CustodyServiceError::TaskRejectedByRelayer(
+                failure_reason.unwrap_or(Default::default()),
+            )),
             _ => Self::Failed(CustodyServiceError::RelayerSendError),
         }
     }
@@ -51,7 +68,7 @@ impl TransferStatus {
     pub fn is_final(&self) -> bool {
         match self {
             TransferStatus::Done | TransferStatus::Failed(_) => true,
-            _ => false
+            _ => false,
         }
     }
 
@@ -70,11 +87,11 @@ impl TransferStatus {
     }
 }
 
-pub struct ScheduledTask<D:'static + KeyValueDB> {
+pub struct ScheduledTask<D: 'static + KeyValueDB> {
     pub request_id: String,
     pub task_index: u32,
     pub account_id: Uuid,
-    pub db: Data< kvdb_rocksdb::Database>,
+    pub db: Data<kvdb_rocksdb::Database>,
     pub job_id: Option<Vec<u8>>,
     pub endpoint: Option<String>,
     pub relayer_url: String,
@@ -85,14 +102,14 @@ pub struct ScheduledTask<D:'static + KeyValueDB> {
     pub params: Data<Parameters<Bn256>>,
     pub tx: Option<TransactionData<Fr>>,
     pub callback_sender: Data<Sender<JobStatusCallback>>,
-    
+
     pub amount: Num<Fr>,
     pub fee: u64,
     pub to: Option<String>,
     pub custody: Data<RwLock<CustodyService>>,
     pub state: Data<State<D>>,
     pub depends_on: Option<Vec<u8>>,
-    pub last_in_seq: bool
+    pub last_in_seq: bool,
 }
 
 impl<D: KeyValueDB> Debug for ScheduledTask<D> {
@@ -117,7 +134,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
             let tx = self.tx.clone().unwrap();
 
             let proving_span = tracing::info_span!("proving", request_id = request_id.clone());
-        
+
             let (inputs, proof) = proving_span.in_scope(|| {
                 prove_tx(
                     &self.params,
@@ -204,7 +221,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
             &self.task_index,
             &self.retries_left
         );
-        
+
         let endpoint = self.endpoint.as_ref().unwrap();
         match fetch_tx_status(&endpoint).await {
             //we have successfuly retrieved job status from relayer
@@ -214,7 +231,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                     //TODO: call webhook on_complete
                     Some(tx_hash) => {
                         let status = TransferStatus::from_relayer_response(
-                            relayer_response.status, 
+                            relayer_response.status,
                             relayer_response.failure_reason,
                         );
                         if status != self.status || self.tx_hash != Some(tx_hash.clone()) {
@@ -224,17 +241,16 @@ impl<D: KeyValueDB> ScheduledTask<D> {
 
                         match status {
                             TransferStatus::Done => {
-                                tracing::info!("marked task {} of request with id {} as done", &self.task_index, &self.request_id);
+                                tracing::info!(
+                                    "marked task {} of request with id {} as done",
+                                    &self.task_index,
+                                    &self.request_id
+                                );
                                 Ok(())
                             }
-                            TransferStatus::Failed(_) => {
-                                Ok(())
-                            }
-                            _ => {
-                                Err(CustodyServiceError::RetryNeeded)   
-                            }
+                            TransferStatus::Failed(_) => Ok(()),
+                            _ => Err(CustodyServiceError::RetryNeeded),
                         }
-                        
                     }
                     // transaction not mined
                     None => {
@@ -278,10 +294,10 @@ impl<D: KeyValueDB> ScheduledTask<D> {
     }
 
     pub fn save_nullifier(&self, nullifier: Vec<u8>) -> Result<(), String> {
-        let nullifier_exists = self.db.has_key(
-            CustodyDbColumn::NullifierIndex.into(), 
-            &nullifier
-        ).map_err(|err| err.to_string())?;
+        let nullifier_exists = self
+            .db
+            .has_key(CustodyDbColumn::NullifierIndex.into(), &nullifier)
+            .map_err(|err| err.to_string())?;
 
         if !nullifier_exists {
             let tx = {
@@ -308,9 +324,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
         tracing::info!("update status initiated");
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|err| {
-                CustodyServiceError::InternalError(err.to_string())
-            })?
+            .map_err(|err| CustodyServiceError::InternalError(err.to_string()))?
             .as_secs();
 
         let job_status_info = JobShortInfo {
@@ -337,26 +351,25 @@ impl<D: KeyValueDB> ScheduledTask<D> {
             .map_err(|err| CustodyServiceError::DataBaseWriteError(err.to_string()))?;
 
         if self.last_in_seq {
-            if let Some(endpoint) = self.callback_address.clone()  {
-                match status  {
+            if let Some(endpoint) = self.callback_address.clone() {
+                match status {
                     TransferStatus::Done | TransferStatus::Failed(_) => {
                         tracing::info!("trying to deliver callback");
-                let job_status_callback = JobStatusCallback {
-                    request_id: self.request_id.clone(),
-                    endpoint,
-                    job_status_info,
-                    retries_left: 42,
-                    timestamp,
-                };
-    
-                self.callback_sender
-                    .send(job_status_callback)
-                    .await
-                    .unwrap();
+                        let job_status_callback = JobStatusCallback {
+                            request_id: self.request_id.clone(),
+                            endpoint,
+                            job_status_info,
+                            retries_left: 42,
+                            timestamp,
+                        };
+
+                        self.callback_sender
+                            .send(job_status_callback)
+                            .await
+                            .unwrap();
                     }
-                    _ => ()
+                    _ => (),
                 }
-                
             }
         }
 
@@ -366,84 +379,93 @@ impl<D: KeyValueDB> ScheduledTask<D> {
     pub async fn previous_status(&mut self) -> Result<TransferStatus, CustodyServiceError> {
         let previous_status = match self.depends_on.clone() {
             Some(depends_on) => {
-                let previous_job = self.db.get(
-                    CustodyDbColumn::JobsIndex.into(), 
-                    &depends_on.clone()
-                )
-                .map_err(|_| CustodyServiceError::DataBaseReadError)?;
+                let previous_job = self
+                    .db
+                    .get(CustodyDbColumn::JobsIndex.into(), &depends_on.clone())
+                    .map_err(|_| CustodyServiceError::DataBaseReadError)?;
 
                 match previous_job {
                     Some(previous_job) => {
-                        let previous_job: JobShortInfo = serde_json::from_slice(&previous_job).map_err(|_| CustodyServiceError::DataBaseReadError)?;
+                        let previous_job: JobShortInfo = serde_json::from_slice(&previous_job)
+                            .map_err(|_| CustodyServiceError::DataBaseReadError)?;
                         previous_job.status
-                    },
+                    }
                     None => {
                         self.update_status(TransferStatus::Failed(
-                            CustodyServiceError::InternalError("previous task not found".to_string())
-                        )).await?;
-                        TransferStatus::Failed(CustodyServiceError::InternalError("previous task not found".to_string()))
+                            CustodyServiceError::InternalError(
+                                "previous task not found".to_string(),
+                            ),
+                        ))
+                        .await?;
+                        TransferStatus::Failed(CustodyServiceError::InternalError(
+                            "previous task not found".to_string(),
+                        ))
                     }
                 }
-            },
-            None => TransferStatus::Done
+            }
+            None => TransferStatus::Done,
         };
 
         Ok(previous_status)
     }
 
     pub async fn prepare_task(&mut self) -> Result<TransferStatus, CustodyServiceError> {
-        
         match self.previous_status().await? {
             TransferStatus::Done => {
                 // TODO: replace this with optimistic state
                 match self.state.sync().await {
-                    Ok(_) => { 
+                    Ok(_) => {
                         let tx = {
                             let custody = self.custody.read().await;
                             custody.sync_account(self.account_id, &self.state).await?;
                             let account = custody.account(self.account_id)?;
                             let account = account.inner.read().await;
-        
+
                             let fee: Num<Fr> = Num::from_uint(NumRepr::from(self.fee)).unwrap();
-        
+
                             let tx_outputs = match &self.to {
                                 Some(to) => {
                                     vec![TxOutput {
                                         to: to.clone(),
                                         amount: TokenAmount::new(self.amount),
                                     }]
-                                },
+                                }
                                 None => vec![],
                             };
-                            let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], tx_outputs);
-        
-                            panic::catch_unwind(AssertUnwindSafe (
-                                || {
-                                    account.create_tx(transfer, None, None)
+                            let transfer =
+                                TxType::Transfer(TokenAmount::new(fee), vec![], tx_outputs);
+
+                            panic::catch_unwind(AssertUnwindSafe(|| {
+                                account
+                                    .create_tx(transfer, None, None)
                                     .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))
-                                }
-                            )).map_err(|_| CustodyServiceError::InternalError("create tx panicked".to_string()) )
+                            }))
+                            .map_err(|_| {
+                                CustodyServiceError::InternalError("create tx panicked".to_string())
+                            })
                         };
-        
+
                         // Result flattening is unstable
                         match tx {
                             Ok(Ok(tx)) => {
                                 self.tx = Some(tx);
                                 self.update_status(TransferStatus::Proving).await?;
                                 Ok(TransferStatus::Proving)
-                            },
+                            }
                             Ok(Err(CustodyServiceError::BadRequest(message))) => {
                                 let err = CustodyServiceError::BadRequest(message.clone());
-                                self.update_status(TransferStatus::Failed(err.clone())).await?;
+                                self.update_status(TransferStatus::Failed(err.clone()))
+                                    .await?;
                                 Ok(TransferStatus::Failed(err))
-                            },
+                            }
                             Err(err) => {
-                                self.update_status(TransferStatus::Failed(err.clone())).await?;
+                                self.update_status(TransferStatus::Failed(err.clone()))
+                                    .await?;
                                 Ok(TransferStatus::Failed(err))
-                            },
-                            Ok(_) => unreachable!()
+                            }
+                            Ok(_) => unreachable!(),
                         }
-                     }
+                    }
                     Err(err) => {
                         tracing::warn!("failed to sync state with error: {:?}", err);
                         Ok(TransferStatus::Queued)
@@ -451,12 +473,15 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                 }
             }
             TransferStatus::Failed(_) => {
-                self.update_status(TransferStatus::Failed(CustodyServiceError::PreviousTxFailed)).await?;
-                Ok(TransferStatus::Failed(CustodyServiceError::PreviousTxFailed))
+                self.update_status(TransferStatus::Failed(
+                    CustodyServiceError::PreviousTxFailed,
+                ))
+                .await?;
+                Ok(TransferStatus::Failed(
+                    CustodyServiceError::PreviousTxFailed,
+                ))
             }
-            _ => {
-                Ok(TransferStatus::Queued)
-            }
+            _ => Ok(TransferStatus::Queued),
         }
     }
 
