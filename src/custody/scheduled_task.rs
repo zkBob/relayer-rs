@@ -15,6 +15,8 @@ use crate::{custody::{routes::fetch_tx_status, service::JobStatusCallback, types
 use super::{errors::CustodyServiceError, service::{CustodyDbColumn, CustodyService}, types::Fr};
 use memo_parser::memo::TxType as MemoTxType;
 
+use std::panic::{self, AssertUnwindSafe};
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum TransferStatus {
     New,
@@ -361,7 +363,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
         Ok(())
     }
 
-    pub async fn prepare_task(&mut self) -> Result<TransferStatus, CustodyServiceError> {
+    pub async fn previous_status(&mut self) -> Result<TransferStatus, CustodyServiceError> {
         let previous_status = match self.depends_on.clone() {
             Some(depends_on) => {
                 let previous_job = self.db.get(
@@ -379,14 +381,19 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                         self.update_status(TransferStatus::Failed(
                             CustodyServiceError::InternalError("previous task not found".to_string())
                         )).await?;
-                        return Ok(TransferStatus::Failed(CustodyServiceError::InternalError("previous task not found".to_string())));
+                        TransferStatus::Failed(CustodyServiceError::InternalError("previous task not found".to_string()))
                     }
                 }
             },
             None => TransferStatus::Done
         };
 
-        match previous_status {
+        Ok(previous_status)
+    }
+
+    pub async fn prepare_task(&mut self) -> Result<TransferStatus, CustodyServiceError> {
+        
+        match self.previous_status().await? {
             TransferStatus::Done => {
                 // TODO: replace this with optimistic state
                 match self.state.sync().await {
@@ -410,20 +417,31 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                             };
                             let transfer = TxType::Transfer(TokenAmount::new(fee), vec![], tx_outputs);
         
-                            account.create_tx(transfer, None, None)
-                                .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))
+                            panic::catch_unwind(AssertUnwindSafe (
+                                || {
+                                    account.create_tx(transfer, None, None)
+                                    .map_err(|e| CustodyServiceError::BadRequest(e.to_string()))
+                                }
+                            )).map_err(|_| CustodyServiceError::InternalError("create tx panicked".to_string()) )
                         };
         
+                        // Result flattening is unstable
                         match tx {
-                            Ok(tx) => {
+                            Ok(Ok(tx)) => {
                                 self.tx = Some(tx);
                                 self.update_status(TransferStatus::Proving).await?;
                                 Ok(TransferStatus::Proving)
                             },
+                            Ok(Err(CustodyServiceError::BadRequest(message))) => {
+                                let err = CustodyServiceError::BadRequest(message.clone());
+                                self.update_status(TransferStatus::Failed(err.clone())).await?;
+                                Ok(TransferStatus::Failed(err))
+                            },
                             Err(err) => {
                                 self.update_status(TransferStatus::Failed(err.clone())).await?;
                                 Ok(TransferStatus::Failed(err))
-                            }
+                            },
+                            Ok(_) => unreachable!()
                         }
                      }
                     Err(err) => {
