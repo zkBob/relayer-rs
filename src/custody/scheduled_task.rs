@@ -452,18 +452,11 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                                 self.update_status(TransferStatus::Proving).await?;
                                 Ok(TransferStatus::Proving)
                             }
-                            Ok(Err(CustodyServiceError::BadRequest(message))) => {
-                                let err = CustodyServiceError::BadRequest(message.clone());
-                                self.update_status(TransferStatus::Failed(err.clone()))
-                                    .await?;
-                                Ok(TransferStatus::Failed(err))
+                            Ok(Err(e)) | Err(e) => {
+                                self.update_status(TransferStatus::Failed(e.clone()))
+                                .await?;
+                                Ok(TransferStatus::Failed(e))
                             }
-                            Err(err) => {
-                                self.update_status(TransferStatus::Failed(err.clone()))
-                                    .await?;
-                                Ok(TransferStatus::Failed(err))
-                            }
-                            Ok(_) => unreachable!(),
                         }
                     }
                     Err(err) => {
