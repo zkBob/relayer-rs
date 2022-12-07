@@ -2,7 +2,7 @@ name: Docker Image CI
 
 on:
   push:
-    branches: ["custody"]
+    branches: ["custody", "custody_fix_rollback"]
   pull_request:
     branches: ["main"]
 
