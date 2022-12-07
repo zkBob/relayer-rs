@@ -275,7 +275,7 @@ impl CustodyService {
                             *next_index = state.finalized.lock().await.next_index();
                         },
                         Err(err) => {
-                            tracing::warn!("failed to sync state with error: {:?}", err);
+                            tracing::warn!("failed to sync state: {:?}", err);
                         }   
                     }
                 });
