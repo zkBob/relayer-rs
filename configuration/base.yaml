@@ -1,30 +1,30 @@
 application:
   host: 127.0.0.1
   port: 8000
-  db_path: ./data
+  db_path: none
   telemetry:
     kind: Stdout
     log_level: DEBUG
   tx:
     vk: tests/data/params/transfer_verification_key.json
     params: tests/data/params/transfer_params.bin
-    client_mock_key: 6cbed15c793ce57650b9877cf6fa156fbef513c4e6134f022a85b1ffdd59b2a1
+    client_mock_key: cafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe
   tree:
     params: tests/data/params/tree_params.bin
 web3:
   relayer_fee: 0
   provider_endpoint: http://localhost:8545
   provider_timeout_sec: 180
-  abi_path: ../configuration/pool-abi.json
-  pool_address: c89ce4735882c9f0f0fe26686c53074e09b0d550
+  abi_path: ./configuration/pool-abi.json
+  pool_address: cafecafecafecafecafecafecafecafecafecafe
   gas_limit: 2000000
   scheduler_interval_sec: 5
   trm_endpoint: http://localhost:8081/wallet_screening
-  start_block: 
+  start_block: 0
   rollback_step: 5
   batch_size: 3000
   credentials:
-      secret_key: 6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c
+      secret_key: cafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe
       trm_api_key: api_key  
 trm:
   host: http://127.0.0.1

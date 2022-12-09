@@ -24,7 +24,8 @@ RUN apt-get update && apt-get install -y libssl-dev
 
 WORKDIR app
 
-COPY --from=builder /app/configuration /app/configuration
+COPY --from=builder /app/configuration/base.yaml /app/configuration/base.yaml
+COPY --from=builder /app/configuration/pool-abi.json /app/configuration/pool-abi.json
 COPY --from=builder /app/docker/run.sh /app/run.sh
 COPY --from=builder /app/target/release/relayer-rs /usr/local/bin
 COPY --from=builder /usr/local/cargo/bin/bunyan /usr/local/bin
