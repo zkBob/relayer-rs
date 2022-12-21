@@ -37,7 +37,7 @@ pub async fn account_info<D: KeyValueDB>(
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let account_id = Uuid::from_str(&request.id).map_err(|err| {
-        tracing::error!("failed to parse account id: {}", err);
+        tracing::debug!("failed to parse account id: {}", err);
         CustodyServiceError::IncorrectAccountId
     })?;
 
@@ -61,7 +61,7 @@ pub async fn calculate_fee<D: KeyValueDB>(
     let request: CalculateFeeRequest = request.0.into();
 
     let account_id = Uuid::from_str(&request.account_id).map_err(|err| {
-        tracing::error!("failed to parse account id: {}", err);
+        tracing::debug!("failed to parse account id: {}", err);
         CustodyServiceError::IncorrectAccountId
     })?;
 
@@ -135,7 +135,7 @@ pub async fn transfer<D: KeyValueDB>(
     let request: TransferRequest = request.0.into();
 
     let account_id = Uuid::from_str(&request.account_id).map_err(|err| {
-        tracing::error!("failed to parse account id: {}", err);
+        tracing::debug!("failed to parse account id: {}", err);
         CustodyServiceError::IncorrectAccountId
     })?;
 
@@ -301,7 +301,7 @@ pub async fn generate_shielded_address<D: KeyValueDB>(
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let account_id = Uuid::from_str(&request.id).map_err(|err| {
-        tracing::error!("failed to parse account id: {}", err);
+        tracing::debug!("failed to parse account id: {}", err);
         CustodyServiceError::IncorrectAccountId
     })?;
 
@@ -319,7 +319,7 @@ pub async fn history<D: KeyValueDB>(
     custody: Custody,
 ) -> Result<HttpResponse, CustodyServiceError> {
     let account_id = Uuid::from_str(&request.id).map_err(|err| {
-        tracing::error!("failed to parse account id: {}", err);
+        tracing::debug!("failed to parse account id: {}", err);
         CustodyServiceError::IncorrectAccountId
     })?;
 
@@ -390,7 +390,7 @@ pub async fn reset_account(
     custody.validate_token(bearer.token())?;
 
     let account_id = Uuid::from_str(&request.id).map_err(|err| {
-        tracing::error!("failed to parse account id: {}", err);
+        tracing::debug!("failed to parse account id: {}", err);
         CustodyServiceError::IncorrectAccountId
     })?;
 
