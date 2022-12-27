@@ -460,7 +460,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                         }
                     }
                     Err(err) => {
-                        tracing::warn!("failed to sync state with error: {:?}", err);
+                        tracing::warn!("failed to sync state: {:?}", err);
                         Ok(TransferStatus::Queued)
                     }
                 }

@@ -36,6 +36,7 @@ pub enum SyncError {
     RpcNodeUnavailable,
     Web3Error(web3::Error),
     RequestTimeout(tokio::time::error::Elapsed),
+    RpcNodeInconsistency(String)
 }
 
 impl From<std::io::Error> for SyncError {
@@ -89,6 +90,10 @@ impl<D: 'static + KeyValueDB> State<D> {
         {
             let pool = &self.pool;
             let (contract_index, contract_root) = pool.root().await?;
+            if contract_root.is_zero() {
+                return Err(SyncError::RpcNodeInconsistency("failed to fetch contract root".to_string()));
+            }
+
             let local_finalized_root = finalized.get_root();
             let local_finalized_index = finalized.next_index();
             tracing::info!(
@@ -113,6 +118,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                     finish_block
                 );
 
+                let mut first_event_index = None;
                 while start_block < finish_block {
                     let progress = ((start_block - from_block.as_u64()) * 100)
                         / (finish_block - from_block.as_u64());
@@ -135,6 +141,8 @@ impl<D: 'static + KeyValueDB> State<D> {
                     );
                     for event in events.iter() {
                         let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
+                        first_event_index = first_event_index.or(Some(index));
+
                         if let Some(tx_hash) = event.transaction_hash {
                             if let Some(tx) = pool
                                 .get_transaction(tx_hash)
@@ -254,7 +262,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                     tracing::warn!("some event was probably skipped, start block will be decreased");
                     let last_block = initial_block.saturating_sub(batch_size);
                     self.save_last_block(last_block)?;
-                    return Err(SyncError::GeneralError("index mismatch".to_string()))
+                    return Err(SyncError::RpcNodeInconsistency("index mismatch".to_string()))
                 }
 
                 if local_index == contract_index.as_u64() && local_root != contract_root {
@@ -263,10 +271,7 @@ impl<D: 'static + KeyValueDB> State<D> {
 
                     tracing::error!("root mismatch, rollback to: {}", rollback_index);
 
-                    let job_id = self.jobs
-                        .get(JobsDbColumn::JobsIndex as u32, &rollback_index.to_be_bytes())
-                        .map_err(|_| SyncError::GeneralError("data base read error".to_string()))?;
-                    if job_id.is_none() {
+                    if first_event_index.is_none() || first_event_index.unwrap() > rollback_index {
                         let last_block = initial_block.saturating_sub(batch_size);
                         self.save_last_block(last_block)?;
                     } else {
