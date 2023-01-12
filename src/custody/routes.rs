@@ -398,3 +398,25 @@ pub async fn reset_account(
 
     Ok(HttpResponse::Ok().finish())
 }
+
+pub async fn export (
+    request: Query<AccountInfoRequest>,
+    custody: Custody,
+) -> Result<HttpResponse, CustodyServiceError> {
+    let account_id = Uuid::from_str(&request.id).map_err(|err| {
+        tracing::debug!("failed to parse account id: {}", err);
+        CustodyServiceError::IncorrectAccountId
+    })?;
+
+    let custody = custody.read().await;
+
+    let account = custody.account(account_id)?;
+
+    let sk = account.export().await?;
+
+    Ok(HttpResponse::Ok().json(
+        serde_json::json!({
+            "sk":sk
+        })
+    ))
+}

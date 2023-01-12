@@ -16,7 +16,17 @@ pub fn serialize(num: Num<Fr>) -> Result<[u8; 32], std::io::Error> {
     Ok(buf)
 }
 
+pub fn serialize_num<T> (num: T)-> Result<[u8; 32], std::io::Error>
+where T:BorshSerialize {
 
+    let mut buf: [u8; 32] = [0; 32];
+
+    BorshSerialize::serialize(&num, &mut &mut buf[0..32]).unwrap();
+
+    buf.reverse();
+
+    Ok(buf)
+}
 pub trait BytesRepr {
     fn bytes(&self) -> Vec<u8> 
     where 

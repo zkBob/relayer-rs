@@ -1,7 +1,6 @@
 use std::{net::TcpListener,};
 
 use actix_cors::Cors;
-use actix_http::header;
 use actix_web::{
     dev::Server,
     middleware,
@@ -38,9 +37,9 @@ pub fn run<D: 'static + KeyValueDB>(
     let server = HttpServer::new(move || {
 
         let cors = Cors::default()
+            .allow_any_header()
+            .allow_any_method()
             .allow_any_origin()
-            .allowed_methods(vec!["GET", "POST"])
-            .allowed_header(header::CONTENT_TYPE)
             .max_age(3600);
 
         App::new()
@@ -76,6 +75,7 @@ pub fn run<D: 'static + KeyValueDB>(
             .route("/callback_mock", web::post().to(crate::custody::routes::callback_mock))
             .route("/rollbackState", web::post().to(rollback_state::<D>))
             .route("/resetAccount", web::post().to(reset_account))
+            .route("/export", web::get().to(crate::custody::routes::export))
             .app_data(state.clone())
             .app_data(custody.clone())
             .app_data(params.clone())
