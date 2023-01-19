@@ -24,7 +24,6 @@ use uuid::Uuid;
 
 use crate::contracts::Pool;
 use crate::custody::types::{HistoryTx, PoolParams};
-use crate::helpers;
 
 use super::errors::CustodyServiceError;
 use super::helpers::AsU64Amount;
@@ -195,13 +194,11 @@ impl Account {
 
     pub async fn export(&self) -> Result<String, CustodyServiceError> {
         let inner = self.inner.read().await;
-        let sk = inner.keys.sk;
-        let bytes = helpers::serialize_num(sk).map_err(|e| 
+        let sk_bytes = inner.keys.sk.try_to_vec().map_err(|e| 
             {
             CustodyServiceError::InternalError(format!("failed to serialize private key {:#?}", e))
         })?;
-
-        Ok(hex::encode(bytes))
+        Ok(hex::encode(sk_bytes))
     }
 
     pub async fn history<F>(&self, get_transaction_id: F, pool: Option<&Pool>) -> Vec<HistoryTx>
