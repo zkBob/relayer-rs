@@ -2,9 +2,10 @@ use std::time::Duration;
 
 use crate::helpers::spawn_app;
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
-use libzeropool::constants::OUT;
 use libzeropool::fawkes_crypto::ff_uint::Num;
+use libzeropool::{constants::OUT, fawkes_crypto::ff_uint::Uint};
 use relayer_rs::{
+    configuration::TelemetryKind,
     custody::types::{
         AccountShortInfo, GenerateAddressResponse, SignupResponse, TransactionStatusResponse,
         TransferRequest, TransferResponse,
@@ -14,7 +15,7 @@ use relayer_rs::{
     types::{
         job::{Job, JobStatus},
         transaction_request::TransactionRequest,
-    }, configuration::TelemetryKind,
+    },
 };
 use tokio::time::sleep;
 
@@ -25,11 +26,9 @@ use wiremock::{Mock, ResponseTemplate};
 
 #[test]
 fn test_target() {
-
     let a: TelemetryKind = TelemetryKind::from("jaeger".to_string());
 
-    println!("a = {:#?}",a );
-
+    println!("a = {:#?}", a);
 }
 
 #[actix_rt::test]
@@ -89,12 +88,8 @@ async fn load_transfers() {
             .unwrap()
             .error_for_status()
             .unwrap();
-        
 
-        let transfer_response: TransferResponse = transfer_response
-            .json()
-            .await
-            .unwrap();
+        let transfer_response: TransferResponse = transfer_response.json().await.unwrap();
         let request_id = transfer_response.request_id;
 
         println!("initiated transfer {}", &request_id);
@@ -614,6 +609,25 @@ async fn test_rollback() {
     );
 }
 
+#[test]
+pub fn test_export() {
+    use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolParams as PoolParamsTrait};
+    pub type PoolParams = libzeropool::native::params::PoolBN256;
+    pub type Fs = <PoolParams as PoolParamsTrait>::Fs;
+
+    let sk_bytes =
+        hex::decode("033f2d8df3fb83f1f4278520c451c4170a0e8edb86f290189c193e440aa46d2d").unwrap();
+    let sk1 = Num::<Fs>::from_uint(libzeropool::fawkes_crypto::ff_uint::NumRepr(
+        Uint::from_little_endian(sk_bytes.as_slice()),
+    ));
+    let reversed =
+        hex::decode("033f2d8df3fb83f1f4278520c451c4170a0e8edb86f290189c193e440aa46d2d").unwrap();
+    let sk2 = Num::<Fs>::from_uint(libzeropool::fawkes_crypto::ff_uint::NumRepr(
+        Uint::from_little_endian(reversed.as_slice()),
+    ));
+
+    println!("{} {}", sk1.is_some(), sk2.is_some());
+}
 #[actix_rt::test]
 pub async fn test_get_logs() {
     let app = spawn_app(false).await.unwrap();
