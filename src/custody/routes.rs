@@ -131,7 +131,12 @@ pub async fn transfer<D: KeyValueDB>(
     custody_db: Data<Database>,
     prover_sender: Data<Sender<ScheduledTask<D>>>,
     callback_sender: Data<Sender<JobStatusCallback>>,
+    bearer: BearerAuth,
 ) -> Result<HttpResponse, CustodyServiceError> {
+    let custody_clone = custody.clone();
+    let custody = custody.write().await;
+    custody.validate_token(bearer.token())?;
+
     let request: TransferRequest = request.0.into();
 
     let account_id = Uuid::from_str(&request.account_id).map_err(|err| {
@@ -139,8 +144,6 @@ pub async fn transfer<D: KeyValueDB>(
         CustodyServiceError::IncorrectAccountId
     })?;
 
-    let custody_clone = custody.clone();
-    let custody = custody.write().await;
     let relayer_url = custody.settings.relayer_url.clone();
     custody.sync_account(account_id, &state).await?;
 
