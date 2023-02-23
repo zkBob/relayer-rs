@@ -1,5 +1,5 @@
 use kvdb::KeyValueDB;
-use libzeropool::{
+use libzkbob_rs::libzeropool::{
     constants::{HEIGHT, OUTPLUSONELOG},
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, prover::Proof, Parameters},

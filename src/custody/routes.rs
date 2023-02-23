@@ -5,7 +5,7 @@ use actix_web::{
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
-use libzeropool::{fawkes_crypto::{
+use libzkbob_rs::libzeropool::{fawkes_crypto::{
     backend::bellman_groth16::{engines::Bn256, Parameters},
 }, constants::OUT};
 

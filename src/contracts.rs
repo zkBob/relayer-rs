@@ -1,7 +1,7 @@
 use std::{str::FromStr, time::Duration};
 use tokio::time::timeout;
 use ethabi::ethereum_types::U64;
-use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::Num};
+use libzkbob_rs::libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::{Num, NumRepr, Uint}};
 use secp256k1::SecretKey;
 use web3::{
     contract::{Contract, Options},
@@ -94,6 +94,14 @@ impl Pool {
             .await
             .expect("failed to check nullifier");
         Ok(exists.is_zero())
+    }
+
+    pub async fn pool_id(&self) -> Result<Num<Fr>, SyncError> {
+        let result = self.contract.query("pool_id", (), None, Options::default(), None);
+        let pool_id = timeout(self.timeout, result).await??;
+        let pool_id = u256_to_num(pool_id)
+            .ok_or(SyncError::GeneralError("failed to parse pool_id".to_string()))?;
+        Ok(pool_id)
     }
 
     pub async fn root(&self) -> Result<(U256, Num<Fr>), SyncError> {
@@ -196,4 +204,10 @@ impl Pool {
     async fn gas_price(&self) -> Result<U256, Web3Error> {
         self.web3.eth().gas_price().await
     }
+}
+
+fn u256_to_num(n: U256) -> Option<Num<Fr>> {
+    let mut buf = [0; 32];
+    n.to_little_endian(&mut buf);
+    Num::from_uint(NumRepr(Uint::from_little_endian(&buf)))
 }

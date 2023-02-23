@@ -3,9 +3,9 @@ use tokio::sync::Mutex;
 use actix_web::web::Data;
 use kvdb_memorydb::InMemory;
 
-use libzeropool::fawkes_crypto::backend::bellman_groth16::verifier::VK;
-use libzeropool::native::params::PoolBN256;
-use libzeropool::POOL_PARAMS;
+use libzkbob_rs::libzeropool::fawkes_crypto::backend::bellman_groth16::verifier::VK;
+use libzkbob_rs::libzeropool::native::params::PoolBN256;
+use libzkbob_rs::libzeropool::POOL_PARAMS;
 use libzkbob_rs::merkle::MerkleTree;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
@@ -18,8 +18,8 @@ use relayer_rs::tx_sender;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{self, Receiver};
 
-use libzeropool::fawkes_crypto::backend::bellman_groth16::setup;
-use libzeropool::{
+use libzkbob_rs::libzeropool::fawkes_crypto::backend::bellman_groth16::setup;
+use libzkbob_rs::libzeropool::{
     circuit::tx::{c_transfer, CTransferPub, CTransferSec},
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, Parameters},
@@ -29,7 +29,7 @@ use libzeropool::{
 use wiremock::MockServer;
 
 use crate::generator::Generator;
-use libzeropool::fawkes_crypto::circuit::cs::CS;
+use libzkbob_rs::libzeropool::fawkes_crypto::circuit::cs::CS;
 pub struct TestApp {
     pub config: Settings,
     pub address: String,

@@ -6,7 +6,7 @@ use relayer_rs::{
     telemetry::setup_telemetry,
 };
 
-use libzeropool::POOL_PARAMS;
+use libzkbob_rs::libzeropool::POOL_PARAMS;
 use libzkbob_rs::merkle::MerkleTree;
 use tokio::sync::{mpsc, Mutex};
 

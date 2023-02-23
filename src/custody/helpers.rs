@@ -1,4 +1,4 @@
-use libzeropool::fawkes_crypto::ff_uint::Num;
+use libzkbob_rs::libzeropool::fawkes_crypto::ff_uint::Num;
 
 use super::types::Fr;
 

@@ -1,6 +1,7 @@
 use std::time::SystemTime;
 
-use libzeropool::fawkes_crypto::{ff_uint::Num, engines::bn256::Fr};
+use libzkbob_rs::libzeropool::fawkes_crypto::{ff_uint::Num, engines::bn256::Fr};
+use memo_parser::calldata::transact::memo::TxType;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 use web3::types::Transaction as Web3Transaction;
@@ -45,7 +46,7 @@ impl Job {
             .map(|id| Uuid::parse_str(&id).unwrap())
             .unwrap_or(Uuid::new_v4());
 
-        let tx_type = u32::from_str_radix(&transaction_request.tx_type, 16).unwrap();
+        let tx_type = TxType::from_u32(u32::from_str_radix(&transaction_request.tx_type, 16).unwrap());
         let memo = hex::decode(&transaction_request.memo).unwrap();
         let nullifier = transaction_request.proof.inputs[1];
         let commitment = transaction_request.proof.inputs[2];

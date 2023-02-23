@@ -110,7 +110,7 @@ pub struct TRMSettings {
     pub api_key: String
 }
 
-use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier, Parameters};
+use libzkbob_rs::libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier, Parameters};
 
 use crate::custody::config::CustodyServiceSettings;
 

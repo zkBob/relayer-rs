@@ -10,7 +10,7 @@ use crate::{
 use actix_web::{dev::Server, web::Data};
 use kvdb::KeyValueDB;
 
-use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier::VK};
+use libzkbob_rs::libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, verifier::VK};
 
 use std::{net::TcpListener};
 use tokio::sync::{mpsc::{self, Sender}, RwLock};
@@ -35,6 +35,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
         tracing::info!("using config {:#?}", configuration);
         let vk = vk.unwrap_or(configuration.application.get_tx_vk().unwrap());
         let pool = Pool::new(&configuration.web3).expect("failed to instantiate pool contract");
+        let pool_id = pool.pool_id().await.expect("failed to fetch pool_id");
 
         let state = Data::new(State {
             pending,
@@ -68,6 +69,7 @@ impl<D: 'static + KeyValueDB> Application<D> {
             configuration.custody,
             state.clone(),
             db.clone(),
+            pool_id,
         )));
 
         let server = routes::run(
