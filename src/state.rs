@@ -3,7 +3,7 @@ use std::{cmp::min, io, time::SystemTime};
 use actix_web::web::{self, Data};
 use ethabi::ethereum_types::U64;
 use kvdb::{DBKey, DBOp::Insert, DBTransaction, KeyValueDB};
-use libzeropool::{
+use libzkbob_rs::libzeropool::{
     constants::OUT,
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, verifier::VK},
@@ -13,7 +13,7 @@ use libzeropool::{
     native::params::PoolBN256,
 };
 use libzkbob_rs::merkle::MerkleTree;
-use memo_parser::memoparser;
+use memo_parser::calldata::{ParsedCalldata, CalldataContent};
 use tokio::sync::{mpsc::Sender, Mutex};
 use tracing_futures::Instrument;
 use uuid::Uuid;
@@ -155,12 +155,32 @@ impl<D: 'static + KeyValueDB> State<D> {
                                     SyncError::RpcNodeUnavailable
                                 })?
                             {
-                                let calldata = memoparser::parse_calldata(&tx.input.0, None)
+                                let calldata = ParsedCalldata::new(tx.input.0.clone(), None)
                                     .expect("Calldata is invalid!");
 
-                                let commitment = Num::from_uint_reduced(NumRepr(
-                                    Uint::from_big_endian(&calldata.out_commit),
-                                ));
+                                let (commitment, nullifier, memo) = match calldata.content {
+                                    CalldataContent::Transact(transact) => {
+                                        let commitment = Num::from_uint_reduced(NumRepr(
+                                            Uint::from_big_endian(&transact.out_commit),
+                                        ));
+                                        let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
+                                            Uint::from_big_endian(&transact.nullifier),
+                                        ));
+                                        let memo = Vec::from(
+                                            &tx.input.0[644..(644 + transact.memo_size) as usize],
+                                        );
+                                        (commitment, nullifier, helpers::truncate_memo_prefix(transact.tx_type, memo))
+                                    },
+                                    CalldataContent::AppendDirectDeposit(dd) => {
+                                        let commitment = Num::from_uint_reduced(NumRepr(
+                                            Uint::from_big_endian(&dd.commitment),
+                                        ));
+                                        // TODO: add memo
+                                        (commitment, Num::ZERO, Vec::new())
+                                    },
+                                    _ => continue,
+                                };
+
                                 tracing::debug!(
                                     "index: {}, commit {}",
                                     index,
@@ -181,15 +201,6 @@ impl<D: 'static + KeyValueDB> State<D> {
                                     finalized.next_index()
                                 );
 
-                                let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
-                                    Uint::from_big_endian(&calldata.nullifier),
-                                ));
-
-                                // TODO: fix this
-                                let memo = Vec::from(
-                                    &tx.input.0[644..(644 + calldata.memo_size) as usize],
-                                );
-
                                 let job_id = Uuid::new_v4();
 
                                 let job = Job {
@@ -202,7 +213,7 @@ impl<D: 'static + KeyValueDB> State<D> {
                                     commitment,
                                     nullifier,
                                     root: None,
-                                    memo: helpers::truncate_memo_prefix(calldata.tx_type, memo),
+                                    memo,
                                 };
 
                                 tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash));

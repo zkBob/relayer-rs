@@ -1,6 +1,6 @@
 use actix_web::web::Data;
 use kvdb::KeyValueDB;
-use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
+use libzkbob_rs::libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
 use tokio::{sync::mpsc::{Receiver, error::TryRecvError}, task};
 use web3::types::Transaction;
 use tracing_futures::Instrument;

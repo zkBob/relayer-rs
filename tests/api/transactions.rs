@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use crate::helpers::spawn_app;
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
-use libzeropool::constants::OUT;
-use libzeropool::fawkes_crypto::ff_uint::Num;
+use libzkbob_rs::libzeropool::constants::OUT;
+use libzkbob_rs::libzeropool::fawkes_crypto::ff_uint::Num;
 use relayer_rs::{
     custody::types::{
         AccountShortInfo, GenerateAddressResponse, SignupResponse, TransactionStatusResponse,

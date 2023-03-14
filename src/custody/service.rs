@@ -12,13 +12,13 @@ use actix_web::web::Data;
 use borsh::BorshSerialize;
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::{Database, DatabaseConfig};
-use libzeropool::fawkes_crypto::ff_uint::NumRepr;
-use libzeropool::{
+use libzkbob_rs::libzeropool::fawkes_crypto::ff_uint::NumRepr;
+use libzkbob_rs::libzeropool::{
     circuit::tx::c_transfer,
     fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters},
     fawkes_crypto::{backend::bellman_groth16::prover::prove, ff_uint::Num},
 };
-use memo_parser::memo::TxType as MemoTxType;
+use memo_parser::calldata::transact::memo::TxType as MemoTxType;
 use serde::{Deserialize, Serialize};
 use tracing_futures::Instrument;
 use std::{
@@ -203,6 +203,7 @@ pub struct CustodyService {
     pub db: Data<kvdb_rocksdb::Database>,
     next_index: Data<RwLock<u64>>,
     start_timestamp: u64,
+    pool_id: Num<Fr>,
 }
 
 impl CustodyService {
@@ -241,6 +242,7 @@ impl CustodyService {
         settings: CustodyServiceSettings,
         state: Data<State<D>>,
         db: Data<Database>,
+        pool_id: Num<Fr>,
     ) -> Self {
         let base_path = format!("{}/accounts_data", &settings.db_path);
         let mut accounts = vec![];
@@ -254,7 +256,7 @@ impl CustodyService {
                         let account_id = path.file_name();
                         let account_id = account_id.to_str().unwrap();
                         tracing::info!("Loading: {}", account_id);
-                        let account = Account::load(&base_path, account_id).unwrap();
+                        let account = Account::load(&base_path, account_id, pool_id).unwrap();
                         accounts.push(account);
                     }
                 }
@@ -294,12 +296,13 @@ impl CustodyService {
             db,
             next_index,
             start_timestamp,
+            pool_id
         }
     }
 
     pub fn new_account(&mut self, description: String, id: Option<Uuid>, sk: Option<String>) -> Result<Uuid, CustodyServiceError> {
         let base_path = format!("{}/accounts_data", self.settings.db_path);
-        let account = Account::new(&base_path, description, id, sk)?;
+        let account = Account::new(&base_path, description, id, sk, self.pool_id)?;
         let id = account.id;
         self.accounts.push(account);
         tracing::info!("created a new account: {}", id);
@@ -387,7 +390,7 @@ impl CustodyService {
         let tx = account.create_tx(deposit, None, None).unwrap();
 
         let circuit = |public, secret| {
-            c_transfer(&public, &secret, &*libzeropool::POOL_PARAMS);
+            c_transfer(&public, &secret, &*libzkbob_rs::libzeropool::POOL_PARAMS);
         };
 
         let (inputs, snark_proof) = prove(params, &tx.public, &tx.secret, circuit);
@@ -494,8 +497,7 @@ impl CustodyService {
 
         tracing::info!("jobs to sync {:#?}", job_indices);
 
-        let parse_result: ParseResult =
-            TxParser::new().parse_native_tx(account.sk().await, indexed_txs);
+        let parse_result: ParseResult = TxParser::new().parse_native_tx(account.sk().await, indexed_txs);
 
         tracing::info!(
             "retrieved new_accounts: {:#?} \n new notes: {:#?}",

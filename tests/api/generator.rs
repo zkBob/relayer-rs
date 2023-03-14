@@ -1,4 +1,4 @@
-use libzeropool::{
+use libzkbob_rs::libzeropool::{
     
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, Parameters},
@@ -9,7 +9,7 @@ use libzeropool::{
 };
 
 
-use libzeropool::POOL_PARAMS;
+use libzkbob_rs::libzeropool::POOL_PARAMS;
 use libzkbob_rs::proof::prove_tx;
 
 use libzkbob_rs::client::{state::State, TxType, UserAccount};
@@ -106,6 +106,7 @@ impl Generator {
         let state = State::init_test(POOL_PARAMS.clone());
         let acc = UserAccount::new(
             Num::from(rand::thread_rng().gen::<u64>()),
+            Num::ZERO,
             state,
             POOL_PARAMS.clone(),
         );
@@ -129,7 +130,7 @@ impl Generator {
             )
             .unwrap();
 
-        let nullifier: Num<libzeropool::fawkes_crypto::engines::bn256::Fr> =
+        let nullifier: Num<Fr> =
             tx_data.public.nullifier;
         let (inputs, proof) = prove_tx(tx_params, &*POOL_PARAMS, tx_data.public, tx_data.secret);
 

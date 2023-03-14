@@ -1,12 +1,10 @@
 use borsh::BorshSerialize;
 use ethabi::ethereum_types::{U256, U64};
 use kvdb_rocksdb::DatabaseConfig;
-use libzeropool::fawkes_crypto::engines::bn256::Fs;
-use libzeropool::fawkes_crypto::ff_uint::NumRepr;
-use libzeropool::fawkes_crypto::rand::Rng;
-use libzeropool::native::account::Account as NativeAccount;
-use libzeropool::POOL_PARAMS;
-use libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
+use libzkbob_rs::libzeropool::fawkes_crypto::{engines::bn256::Fs, ff_uint::NumRepr, rand::Rng};
+use libzkbob_rs::libzeropool::native::account::Account as NativeAccount;
+use libzkbob_rs::libzeropool::POOL_PARAMS;
+use libzkbob_rs::libzeropool::{fawkes_crypto::ff_uint::Num, native::params::PoolBN256};
 use libzkbob_rs::address;
 use libzkbob_rs::random::CustomRng;
 use libzkbob_rs::{
@@ -14,8 +12,8 @@ use libzkbob_rs::{
     merkle::MerkleTree,
     sparse_array::SparseArray,
 };
-use memo_parser::memo::TxType;
-use memo_parser::memoparser;
+use memo_parser::calldata::{ParsedCalldata, CalldataContent};
+use memo_parser::calldata::transact::memo::TxType;
 use std::fmt::Display;
 use std::str::FromStr;
 use tokio::sync::RwLock;
@@ -209,9 +207,18 @@ impl Account {
         let mut last_account: Option<NativeAccount<Fr>> = None;
         for (_, value) in self.history.iter(HistoryDbColumn::NotesIndex.into()) {
             let tx: HistoryRecord = serde_json::from_slice(&value).unwrap();
-            let calldata = memoparser::parse_calldata(&tx.calldata, None).unwrap();
+            let calldata = ParsedCalldata::new(tx.calldata, None).unwrap();
+            
+            let calldata = match calldata.content {
+                CalldataContent::Transact(calldata) => calldata,
+                _ => {
+                    // TODO: add dd support
+                    continue;
+                }
+            };
+
             let dec_memo = tx.dec_memo;
-            let tx_type = TxType::from_u32(calldata.tx_type);
+            let tx_type = calldata.tx_type;
             let nullifier = calldata.nullifier;
 
             let history_records = match tx_type {
@@ -313,7 +320,7 @@ impl Account {
         history
     }
 
-    pub fn new(base_path: &str, description: String, id: Option<Uuid>, sk: Option<String>) -> Result<Self, CustodyServiceError> {
+    pub fn new(base_path: &str, description: String, id: Option<Uuid>, sk: Option<String>, pool_id: Num<Fr>) -> Result<Self, CustodyServiceError> {
         let id = id.unwrap_or(uuid::Uuid::new_v4());
         let state = State::new(
             MerkleTree::new_native(
@@ -361,7 +368,7 @@ impl Account {
             })
             .unwrap();
 
-        let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
+        let user_account = NativeUserAccount::from_seed(&sk, pool_id, state, POOL_PARAMS.clone());
         Ok(Self {
             inner: RwLock::new(user_account),
             id,
@@ -378,7 +385,7 @@ impl Account {
         })
     }
 
-    pub fn load(base_path: &str, account_id: &str) -> Result<Self, String> {
+    pub fn load(base_path: &str, account_id: &str, pool_id: Num<Fr>) -> Result<Self, String> {
         let id = uuid::Uuid::from_str(account_id).map_err(|err| err.to_string())?;
         let state = State::new(
             MerkleTree::new_native(
@@ -412,7 +419,7 @@ impl Account {
         )
         .unwrap();
 
-        let user_account = NativeUserAccount::from_seed(&sk, state, POOL_PARAMS.clone());
+        let user_account = NativeUserAccount::from_seed(&sk, pool_id, state, POOL_PARAMS.clone());
         Ok(Self {
             inner: RwLock::new(user_account),
             id,

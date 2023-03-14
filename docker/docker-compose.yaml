@@ -9,12 +9,11 @@ services:
       - ../configuration:/app/configuration
       - ../data:/app/data
     environment:
-      APP_ENVIRONMENT: $APP_ENVIRONMENT
-      RUST_LOG: $RUST_LOG
+      APP_ENVIRONMENT: staging
+      RUST_LOG: info
       RUST_BACKTRACE: 1
     ports:
       - 8001:8001
-      - 80:80
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -1,7 +1,7 @@
 use actix_web::web::Data;
 use kvdb::KeyValueDB;
-use libzeropool::fawkes_crypto::{backend::bellman_groth16::{verifier, prover, engines::Bn256}, ff_uint::Num, engines::bn256::Fr};
-use memo_parser::memo::{Memo, TxType};
+use libzkbob_rs::libzeropool::fawkes_crypto::{backend::bellman_groth16::{verifier, prover, engines::Bn256}, ff_uint::Num, engines::bn256::Fr};
+use memo_parser::calldata::transact::memo::{Memo, TxType};
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
@@ -65,7 +65,7 @@ impl TransactionRequest {
             "0003" => TxType::DepositPermittable,
             _ => TxType::Deposit,
         };
-        let parsed_memo = Memo::parse_memoblock(&tx_memo_bytes.unwrap(), tx_type);
+        let parsed_memo = Memo::parse_memoblock(tx_memo_bytes.unwrap(), tx_type);
     
         if parsed_memo.fee < state.settings.web3.relayer_fee {
             tracing::warn!(

@@ -9,7 +9,7 @@ use actix_web::{
 };
 use kvdb::KeyValueDB;
 use kvdb_rocksdb::Database;
-use libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
+use libzkbob_rs::libzeropool::fawkes_crypto::backend::bellman_groth16::{engines::Bn256, Parameters};
 use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{

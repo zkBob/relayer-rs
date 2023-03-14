@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use actix_web::web::Data;
 use core::fmt::Debug;
 use kvdb::KeyValueDB;
-use libzeropool::fawkes_crypto::{
+use libzkbob_rs::libzeropool::fawkes_crypto::{
     backend::bellman_groth16::{engines::Bn256, Parameters},
     ff_uint::{Num, NumRepr},
 };
@@ -34,7 +34,7 @@ use super::{
     service::{CustodyDbColumn, CustodyService},
     types::Fr,
 };
-use memo_parser::memo::TxType as MemoTxType;
+use memo_parser::calldata::transact::memo::TxType as MemoTxType;
 
 use std::panic::{self, AssertUnwindSafe};
 
@@ -138,7 +138,7 @@ impl<D: KeyValueDB> ScheduledTask<D> {
             let (inputs, proof) = proving_span.in_scope(|| {
                 prove_tx(
                     &self.params,
-                    &*libzeropool::POOL_PARAMS,
+                    &*libzkbob_rs::libzeropool::POOL_PARAMS,
                     tx.public,
                     tx.secret,
                 )

@@ -3,7 +3,7 @@ use actix_web::{
     HttpResponse,
 };
 use kvdb::KeyValueDB;
-use libzeropool::constants::OUT;
+use libzkbob_rs::libzeropool::constants::OUT;
 use serde::Deserialize;
 
 use crate::{
