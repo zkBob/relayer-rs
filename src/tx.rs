@@ -1,5 +1,5 @@
 use kvdb::KeyValueDB;
-use libzeropool::{
+use libzkbob_rs::libzeropool::{
     constants::{HEIGHT, OUTPLUSONELOG},
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, prover::Proof, Parameters},
@@ -15,7 +15,7 @@ use libzeropool::{
 };
 use libzkbob_rs::{merkle::MerkleTree, proof};
 
-use crate::{helpers::BytesRepr, state::Job};
+use crate::{helpers::BytesRepr, types::job::Job};
 
 const TRANSFER_INDEX_SIZE: usize = 6;
 const ENERGY_SIZE: usize = 14;

@@ -1,18 +1,18 @@
-use std::str::FromStr;
-
-use libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::Num};
+use std::{str::FromStr, time::Duration};
+use tokio::time::timeout;
+use ethabi::ethereum_types::U64;
+use libzkbob_rs::libzeropool::fawkes_crypto::{engines::bn256::Fr, ff_uint::{Num, NumRepr, Uint}};
 use secp256k1::SecretKey;
 use web3::{
     contract::{Contract, Options},
     transports::Http,
     types::{
         BlockNumber, Bytes, FilterBuilder, Log, LogWithMeta, Transaction, TransactionId,
-        TransactionReceipt, H160, H256, U256,
+        TransactionReceipt, H160, H256, U256, BlockId,
     },
     Error as Web3Error, Web3,
 };
 
-use actix_web::web::Data;
 
 use crate::{configuration::Web3Settings, state::SyncError};
 
@@ -26,10 +26,11 @@ pub struct Pool {
     key: SecretKey,
     gas_limit: U256,
     transact_short_signature: Vec<u8>,
+    timeout: Duration,
 }
 
 impl Pool {
-    pub fn new(config: Data<Web3Settings>) -> Result<Self, SyncError> {
+    pub fn new(config: &Web3Settings) -> Result<Self, SyncError> {
         let contract_address = H160::from_str(&config.pool_address).expect("bad pool address");
 
         let http = web3::transports::Http::new(&config.provider_endpoint)
@@ -59,14 +60,18 @@ impl Pool {
             key,
             gas_limit: U256::from(config.gas_limit),
             transact_short_signature: short_signature,
+            timeout: Duration::from_secs(config.provider_timeout_sec),
         })
     }
 
-    pub async fn get_transaction(&self, tx_hash: H256) -> Result<Option<Transaction>, web3::Error> {
-        self.web3
-            .eth()
-            .transaction(TransactionId::Hash(tx_hash))
-            .await
+    pub async fn get_transaction(&self, tx_hash: H256) -> Result<Option<Transaction>, SyncError> {
+        let tx = timeout(
+            self.timeout, 
+            self.web3
+                .eth()
+                .transaction(TransactionId::Hash(tx_hash))
+        ).await??;
+        Ok(tx)
     }
 
     pub async fn get_transaction_receipt(
@@ -91,14 +96,22 @@ impl Pool {
         Ok(exists.is_zero())
     }
 
+    pub async fn pool_id(&self) -> Result<Num<Fr>, SyncError> {
+        let result = self.contract.query("pool_id", (), None, Options::default(), None);
+        let pool_id = timeout(self.timeout, result).await??;
+        let pool_id = u256_to_num(pool_id)
+            .ok_or(SyncError::GeneralError("failed to parse pool_id".to_string()))?;
+        Ok(pool_id)
+    }
+
     pub async fn root(&self) -> Result<(U256, Num<Fr>), SyncError> {
         let contract = &self.contract;
         let result = contract.query("pool_index", (), None, Options::default(), None);
-        let pool_index: U256 = result.await?;
+        let pool_index = timeout(self.timeout, result).await??;
 
         let result = contract.query("roots", (pool_index,), None, Options::default(), None);
 
-        let root: U256 = result.await?;
+        let root: U256 = timeout(self.timeout, result).await??;
 
         let root = Num::from_str(&root.to_string()).unwrap();
 
@@ -117,7 +130,7 @@ impl Pool {
             .contract
             .events("Message", from_block, to_block, block_hash, (), (), ());
 
-        let events: Events = result.await?;
+        let events: Events = timeout(self.timeout, result).await??;
 
         Ok(events)
     }
@@ -155,12 +168,6 @@ impl Pool {
             .await
             .unwrap();
 
-        // std::fs::write(
-        //     "tests/data/logs.json",
-        //     serde_json::to_string_pretty(&logs).unwrap(),
-        // )
-        // .unwrap();
-
         Ok(logs)
     }
 
@@ -184,7 +191,23 @@ impl Pool {
         Ok(tx_hash)
     }
 
+    pub async fn block_timestamp(&self, block_number: U64) -> Result<U256, Web3Error> {
+        let block = self.web3.eth().block(BlockId::Number(BlockNumber::Number(block_number))).await?.unwrap();
+        Ok(block.timestamp)
+    }
+
+    pub async fn block_number(&self) -> Result<U64, SyncError> {
+        let block_number = timeout(self.timeout, self.web3.eth().block_number()).await??;
+        Ok(block_number)
+    }
+
     async fn gas_price(&self) -> Result<U256, Web3Error> {
         self.web3.eth().gas_price().await
     }
+}
+
+fn u256_to_num(n: U256) -> Option<Num<Fr>> {
+    let mut buf = [0; 32];
+    n.to_little_endian(&mut buf);
+    Num::from_uint(NumRepr(Uint::from_little_endian(&buf)))
 }

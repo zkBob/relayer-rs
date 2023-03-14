@@ -1,17 +1,157 @@
+use std::time::Duration;
+
 use crate::helpers::spawn_app;
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
-use libzeropool::constants::OUT;
-use libzeropool::fawkes_crypto::ff_uint::Num;
+use libzkbob_rs::libzeropool::constants::OUT;
+use libzkbob_rs::libzeropool::fawkes_crypto::ff_uint::Num;
 use relayer_rs::{
-    routes::send_transactions::TransactionRequest,
-    state::{Job, JobStatus, JobsDbColumn},
+    custody::types::{
+        AccountShortInfo, GenerateAddressResponse, SignupResponse, TransactionStatusResponse,
+        TransferRequest, TransferResponse,
+    },
+    state::JobsDbColumn,
     tx_checker::check_tx,
+    types::{
+        job::{Job, JobStatus},
+        transaction_request::TransactionRequest,
+    }, configuration::TelemetryKind,
 };
+use tokio::time::sleep;
 
 use serde_json::{json, Value};
 use web3::types::BlockNumber;
 use wiremock::matchers::{body_string_contains, method};
 use wiremock::{Mock, ResponseTemplate};
+
+#[test]
+fn test_target() {
+
+    let a: TelemetryKind = TelemetryKind::from("jaeger".to_string());
+
+    println!("a = {:#?}",a );
+
+}
+
+#[actix_rt::test]
+async fn load_transfers() {
+    let client = reqwest::Client::new();
+
+    let base_account = std::env::var("BASE_ACCOUNT").unwrap();
+
+    let mut accounts: Vec<(String, String)> = vec![];
+
+    for _ in 1..5 {
+        let signup_response: SignupResponse = client
+            .post("http://localhost:8001/signup")
+            .header("Authorization", "Bearer 1337")
+            .json(&json!( {
+                "description":"foobar"
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        let account_id = signup_response.account_id;
+
+        println!("signup returned account {}", &account_id);
+
+        let gen_address: GenerateAddressResponse = client
+            .get("http://localhost:8001/generateAddress")
+            .query(&[("id", &account_id)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        println!("gen address returned address {}", &gen_address.address);
+
+        accounts.push((account_id.clone(), gen_address.address.clone()));
+
+        let transfer_response = client
+            .post("http://localhost:8001/transfer")
+            .json(
+                &serde_json::to_value(TransferRequest {
+                    account_id: base_account.to_string().clone(),
+                    to: gen_address.address,
+                    amount: 101000000 as u64,
+                    webhook: None,
+                    request_id: None,
+                })
+                .unwrap(),
+            )
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+        
+
+        let transfer_response: TransferResponse = transfer_response
+            .json()
+            .await
+            .unwrap();
+        let request_id = transfer_response.request_id;
+
+        println!("initiated transfer {}", &request_id);
+
+        println!("waiting for transfers to finish");
+        sleep(Duration::from_secs(60)).await;
+
+        let status: TransactionStatusResponse = client
+            .get("http://localhost:8001/transactionStatus")
+            .query(&[("requestId", &request_id)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        println!("got status: {:?}", status.status);
+
+        let account_info: AccountShortInfo = client
+            .get("http://localhost:8001/account")
+            .query(&[("id", &account_id)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        println!("account balance: {}", account_info.balance);
+        println!("**************************************************************");
+    }
+
+    for (account_id, address) in accounts {
+        let transfer_response: String = client
+            .post("http://localhost:8001/transfer")
+            .json(
+                &serde_json::to_value(TransferRequest {
+                    account_id,
+                    to: address,
+                    amount: 1000000 as u64,
+                    webhook: None,
+                    request_id: None,
+                })
+                .unwrap(),
+            )
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        // let request_id = transfer_response.request_id;
+
+        println!("initiated transfer response {}", &transfer_response);
+    }
+}
 
 #[actix_rt::test]
 async fn get_transactions_works() {
@@ -80,13 +220,13 @@ async fn gen_tx_and_send() {
             .has_key(0, request_id.as_hyphenated().to_string().as_bytes())
             .unwrap());
 
-        let pending = state.pending.lock().unwrap();
+        let pending = state.pending.lock().await;
         {
             let next_index = pending.next_index();
             assert_eq!(next_index, OUT as u64 + 1);
         }
 
-        let finalized = state.finalized.lock().unwrap();
+        let finalized = state.finalized.lock().await;
         {
             assert_eq!(finalized.next_index(), 0 as u64);
         }
@@ -116,7 +256,7 @@ async fn test_parse_fee_from_tx() {
 async fn test_check_pending_state_after_tx() {
     let test_app = spawn_app(true).await.unwrap();
     {
-        let pending_state = test_app.state.pending.lock().unwrap();
+        let pending_state = test_app.state.pending.lock().await;
         let root = pending_state.get_root();
         assert_eq!(
             root,
@@ -137,7 +277,7 @@ async fn test_check_pending_state_after_tx() {
         .await
         .expect("failed to make request");
     {
-        let pending_state = test_app.state.pending.lock().unwrap();
+        let pending_state = test_app.state.pending.lock().await;
         let root = pending_state.get_root();
         assert_eq!(
             root,
@@ -152,7 +292,7 @@ async fn test_check_pending_state_after_tx() {
 async fn test_check_pending_state_after_two_tx() {
     let test_app = spawn_app(true).await.unwrap();
     {
-        let pending_state = test_app.state.pending.lock().unwrap();
+        let pending_state = test_app.state.pending.lock().await;
         let root = pending_state.get_root();
         assert_eq!(
             root,
@@ -173,7 +313,7 @@ async fn test_check_pending_state_after_two_tx() {
         .await
         .expect("failed to make request");
     {
-        let pending_state = test_app.state.pending.lock().unwrap();
+        let pending_state = test_app.state.pending.lock().await;
         let root = pending_state.get_root();
         assert_eq!(
             root,
@@ -190,7 +330,7 @@ async fn test_check_pending_state_after_two_tx() {
         .await
         .expect("failed to make request");
     {
-        let pending_state = test_app.state.pending.lock().unwrap();
+        let pending_state = test_app.state.pending.lock().await;
         let root = pending_state.get_root();
         assert_eq!(
             root,
@@ -249,8 +389,8 @@ async fn test_finalize() {
 
     assert_eq!(updated_job.status, JobStatus::Done);
 
-    let finalized = state.finalized.lock().unwrap();
-    let pending = state.pending.lock().unwrap();
+    let finalized = state.finalized.lock().await;
+    let pending = state.pending.lock().await;
     assert_eq!(finalized.next_index(), pending.next_index());
 }
 
@@ -363,7 +503,7 @@ async fn test_rollback() {
 
     // Rollback finalized state manually to simulate a gap between pending and finalized state
     {
-        let mut finalized = app.state.finalized.lock().unwrap();
+        let mut finalized = app.state.finalized.lock().await;
 
         finalized.rollback(0 as u64);
     }
@@ -405,13 +545,13 @@ async fn test_rollback() {
     let last_job: Job = serde_json::from_slice(&last_job).unwrap();
 
     {
-        let pending = app.state.pending.lock().unwrap();
+        let pending = app.state.pending.lock().await;
 
         assert_eq!(pending.next_index(), 256 as u64, "wrong index after sync");
     }
 
     {
-        let finalized = app.state.finalized.lock().unwrap();
+        let finalized = app.state.finalized.lock().await;
 
         assert_eq!(
             finalized.next_index(),
@@ -451,13 +591,13 @@ async fn test_rollback() {
     }
 
     {
-        let pending = app.state.pending.lock().unwrap();
+        let pending = app.state.pending.lock().await;
 
         assert_eq!(pending.next_index(), 0 as u64);
     }
 
     {
-        let finalized = app.state.finalized.lock().unwrap();
+        let finalized = app.state.finalized.lock().await;
 
         assert_eq!(finalized.next_index(), 0 as u64);
     }

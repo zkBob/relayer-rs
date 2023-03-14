@@ -5,7 +5,8 @@ use tokio::task;
 use kvdb::{DBKey, DBOp, DBTransaction, KeyValueDB};
 
 use crate::helpers::serialize;
-use crate::state::{Job, JobStatus, JobsDbColumn, State};
+use crate::state::{JobsDbColumn, State};
+use crate::types::job::{Job, JobStatus};
 
 pub fn start<D: KeyValueDB>(state: &Data<State<D>>) -> () {
     let state = state.clone();
@@ -32,7 +33,7 @@ pub fn start<D: KeyValueDB>(state: &Data<State<D>>) -> () {
                     _ => (),
                 }
             }
-            tokio::time::sleep(Duration::from_secs(state.web3.scheduler_interval_sec)).await;
+            tokio::time::sleep(Duration::from_secs(state.settings.web3.scheduler_interval_sec)).await;
         }
     });
 }
@@ -60,7 +61,7 @@ pub async fn check_tx<D: KeyValueDB>(
             state
                 .finalized
                 .lock()
-                .unwrap()
+                .await
                 .add_leafs_and_commitments(vec![], vec![(job.index, job.commitment)]);
 
             job.status = JobStatus::Done;
@@ -85,9 +86,9 @@ pub async fn check_tx<D: KeyValueDB>(
                 tx_receipt.block_number.unwrap()
             );
 
-            let mut pending = state.pending.lock().unwrap();
+            let mut pending = state.pending.lock().await;
 
-            let finalized = state.finalized.lock().unwrap();
+            let finalized = state.finalized.lock().await;
 
             pending.rollback(finalized.next_index());
 

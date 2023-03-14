@@ -1,7 +1,7 @@
 use borsh::BorshSerialize;
-use libzeropool::fawkes_crypto::{ff_uint::Num, engines::bn256::Fr};
-use libzeropool::fawkes_crypto::{engines::bn256::Fq, backend::bellman_groth16::{prover::Proof, engines::Bn256}};
-use memo_parser::memo::TxType;
+use libzkbob_rs::libzeropool::fawkes_crypto::{ff_uint::Num, engines::bn256::Fr};
+use libzkbob_rs::libzeropool::fawkes_crypto::{engines::bn256::Fq, backend::bellman_groth16::{prover::Proof, engines::Bn256}};
+use memo_parser::calldata::transact::memo::TxType;
 use num_bigint::{BigInt, ToBigInt};
 
 
@@ -16,7 +16,17 @@ pub fn serialize(num: Num<Fr>) -> Result<[u8; 32], std::io::Error> {
     Ok(buf)
 }
 
+pub fn serialize_num<T> (num: T)-> Result<[u8; 32], std::io::Error>
+where T:BorshSerialize {
 
+    let mut buf: [u8; 32] = [0; 32];
+
+    BorshSerialize::serialize(&num, &mut &mut buf[0..32]).unwrap();
+
+    buf.reverse();
+
+    Ok(buf)
+}
 pub trait BytesRepr {
     fn bytes(&self) -> Vec<u8> 
     where 
@@ -66,8 +76,8 @@ impl BytesRepr for Proof<Bn256> {
     }
 }
 
-pub fn truncate_memo_prefix(tx_type: u32, memo: Vec<u8>) -> Vec<u8> {
-    match TxType::from_u32(tx_type) {
+pub fn truncate_memo_prefix(tx_type: TxType, memo: Vec<u8>) -> Vec<u8> {
+    match tx_type {
         TxType::Deposit => memo[8..].to_vec(),
         TxType::Transfer => memo[8..].to_vec(),
         TxType::Withdrawal => memo[36..].to_vec(),
@@ -77,7 +87,7 @@ pub fn truncate_memo_prefix(tx_type: u32, memo: Vec<u8>) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use libzeropool::fawkes_crypto::{ff_uint::{NumRepr, Num}, engines::{U256, bn256::Fr}};
+    use libzkbob_rs::libzeropool::fawkes_crypto::{ff_uint::{NumRepr, Num}, engines::{U256, bn256::Fr}};
 
     use crate::helpers::BytesRepr;
 

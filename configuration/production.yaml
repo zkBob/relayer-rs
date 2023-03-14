@@ -1,0 +1,18 @@
+application:
+  host: 0.0.0.0
+  port: 80
+  tx:
+    vk: params/transfer_verification_key.json
+    params: params/transfer_params.bin
+  tree:
+    params: params/tree_params.bin
+web3:
+  provider_endpoint: https://rpc.ankr.com/polygon
+  pool_address: 72e6b59d4a90ab232e55d4bb7ed2dd17494d62fb
+  start_block: 32845526
+  relayer_fee: 100000000
+custody:
+  db_path: ./data/custody_db
+  relayer_url: https://relayer-mvp.zkbob.com
+  sync_interval_sec: 15
+  admin_token: 7c4dec5050bc384e553eac2a3ee22dde9c96bccf1c584e2f4d8b036ef7adfa0a

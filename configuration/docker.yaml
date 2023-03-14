@@ -1,0 +1,19 @@
+application:
+  host: 0.0.0.0
+  port: 8001
+  tx:
+    vk: params/transfer_verification_key.json
+    params: params/transfer_params.bin
+  tree:
+    params: params/tree_params.bin
+web3:
+  provider_endpoint: http://host.docker.internal:8545
+  pool_address: 0290FB167208Af455bB137780163b7B7a9a10C16
+  relayer_fee: 100000000
+  credentials:
+    secret_key: 6370fd033278c143179d81c5526140625662b8daa446c22ee2d73db3707e620c
+custody:
+  db_path: ./data/custody
+  relayer_url: http://host.docker.internal:8000
+  sync_interval_sec: 5
+  admin_token: 12345

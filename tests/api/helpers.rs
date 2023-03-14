@@ -1,24 +1,25 @@
-use std::sync::{Arc, Mutex};
+use tokio::sync::Mutex;
 
 use actix_web::web::Data;
 use kvdb_memorydb::InMemory;
 
-use libzeropool::fawkes_crypto::backend::bellman_groth16::verifier::VK;
-use libzeropool::native::params::PoolBN256;
-use libzeropool::POOL_PARAMS;
+use libzkbob_rs::libzeropool::fawkes_crypto::backend::bellman_groth16::verifier::VK;
+use libzkbob_rs::libzeropool::native::params::PoolBN256;
+use libzkbob_rs::libzeropool::POOL_PARAMS;
 use libzkbob_rs::merkle::MerkleTree;
 use once_cell::sync::Lazy;
 use relayer_rs::configuration::{get_config, Settings};
 use relayer_rs::contracts::Pool;
 use relayer_rs::startup::Application;
-use relayer_rs::state::{Job, State};
-use relayer_rs::telemetry::{get_subscriber, init_subscriber};
-use relayer_rs::{tx_checker, tx_sender};
+use relayer_rs::state::State;
+use relayer_rs::types::job::Job;
+use relayer_rs::telemetry::{ init_stdout, init_sink};
+use relayer_rs::tx_sender;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{self, Receiver};
 
-use libzeropool::fawkes_crypto::backend::bellman_groth16::setup;
-use libzeropool::{
+use libzkbob_rs::libzeropool::fawkes_crypto::backend::bellman_groth16::setup;
+use libzkbob_rs::libzeropool::{
     circuit::tx::{c_transfer, CTransferPub, CTransferSec},
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, Parameters},
@@ -27,8 +28,8 @@ use libzeropool::{
 };
 use wiremock::MockServer;
 
-use crate::generator::{self, Generator};
-use libzeropool::fawkes_crypto::circuit::cs::CS;
+use crate::generator::Generator;
+use libzkbob_rs::libzeropool::fawkes_crypto::circuit::cs::CS;
 pub struct TestApp {
     pub config: Settings,
     pub address: String,
@@ -42,12 +43,11 @@ pub struct TestApp {
 impl TestApp {
     pub async fn process_job(&mut self) {
         let tree_params = self.config.application.get_tree_params();
-        let pool = Pool::new(Data::new(self.config.web3.clone()))
+        let pool = Pool::new(&self.config.web3)
             .expect("failed to instantiate pool contract");
-        // tx_sender::receive_one(&self.state, self.receiver, tree_params, pool);
         match self.receiver.try_recv() {
             Ok(job) => tx_sender::process_job(job, &self.state, &tree_params, &pool).await,
-            Err(TryRecvError::Empty) => tracing::error!("WTF NO MESSAGE"),
+            Err(TryRecvError::Empty) => tracing::error!("No messages"),
             Err(error) => tracing::error!("{:#?}", error),
         };
     }
@@ -56,21 +56,25 @@ type DB = Data<Mutex<MerkleTree<InMemory, PoolBN256>>>;
 
 static TRACING: Lazy<()> = Lazy::new(|| {
     if std::env::var("TEST_LOG").is_ok() {
-        init_subscriber(get_subscriber(
-            "test".into(),
-            "info".into(),
-            std::io::stdout,
-        ))
+        init_stdout("test".into(), "info".into())
     } else {
-        init_subscriber(get_subscriber("test".into(), "info".into(), std::io::sink))
+        init_sink("test".into(), "info".into())
     }
 });
 
 pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
     Lazy::force(&TRACING);
+
+    let mock_listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("failed to start listene for mock server");
+
+    let mock_server = MockServer::builder().listener(mock_listener).start().await;
+
     let config: Settings = {
         let mut c = get_config().expect("failed to get config");
         c.application.port = 0;
+        c.trm.port =  mock_server.address().port();
+        // c.web3.trm_endpoint = format!("http://127.0.0.1:{}/trm_mock", mock_server.address().port());
         c
     };
 
@@ -123,11 +127,12 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
 
     let finalized: DB = Data::new(Mutex::new(MerkleTree::new_test(POOL_PARAMS.clone())));
 
-    let jobs = Data::new(kvdb_memorydb::create(3));
+    let jobs = Data::new(kvdb_memorydb::create(4));
     /*
     0 - jobs
-    1 - nullifiers
-    2 - tx to check receipt ( can't query jobs by status )
+    1 - jobs index
+    2 - nullifiers
+    3 - tx to check receipt ( can't query jobs by status )
      */
 
     let vk_str = std::fs::read_to_string(&config.application.tx.vk).unwrap();
@@ -158,10 +163,6 @@ pub async fn spawn_app(gen_params: bool) -> Result<TestApp, std::io::Error> {
     let port = app.port();
 
     let address = format!("http://127.0.0.1:{}", port);
-
-    let listener = std::net::TcpListener::bind("0.0.0.0:8546").expect("failed to start listener");
-
-    let mock_server = MockServer::builder().listener(listener).start().await;
 
     // tx_sender::start(&app.state, receiver, tree_params, pool);
     // tx_checker::start(&app.state);

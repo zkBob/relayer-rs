@@ -1,4 +1,3 @@
-use actix_web::web::Data;
 use relayer_rs::{
     configuration::get_config,
     contracts::Pool,
@@ -29,7 +28,7 @@ async fn test_get_events() {
 
     let config = get_config().unwrap();
 
-    let events = &Pool::new(Data::new(config.web3)).unwrap().get_events(
+    let events = &Pool::new(&config.web3).unwrap().get_events(
         Some(BlockNumber::Earliest),
         Some(BlockNumber::Latest),
         None,

@@ -1,5 +1,6 @@
 use actix_http::StatusCode;
-use actix_web::ResponseError;
+use actix_web::{ResponseError, http::header::ContentType, HttpResponse};
+use serde::Serialize;
 
 use crate::routes::{
     fee::fee,
@@ -11,15 +12,17 @@ use crate::routes::{
 
 mod fee;
 mod info;
-mod job;
+pub mod job;
 pub mod routes;
 pub mod send_transactions;
 mod transactions;
+pub mod wallet_screening;
 
 #[derive(Debug)]
 pub enum ServiceError {
     BadRequest(String),
     InternalError,
+    AccountNotFound
 }
 
 impl From<std::io::Error> for ServiceError {
@@ -30,7 +33,13 @@ impl From<std::io::Error> for ServiceError {
 
 impl std::fmt::Display for ServiceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "request failed")
+        let error = match self {
+            ServiceError::BadRequest(err) => format!("BadRequest: {}", err),
+            ServiceError::InternalError => format!("InternalError"),
+            ServiceError::AccountNotFound => "Account not found".to_string(),
+        };
+
+        write!(f, "{}", error)
     }
 }
 
@@ -39,6 +48,24 @@ impl ResponseError for ServiceError {
         match self {
             ServiceError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ServiceError::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
+            ServiceError::AccountNotFound => StatusCode::NOT_FOUND,
         }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        #[derive(Serialize)]
+        struct ErrorResponse {
+            
+            error: String,
+        }
+        
+        let response = serde_json::to_string(&ErrorResponse{
+            
+            error: format!("{}", self),
+        }).unwrap();
+
+        HttpResponse::build(self.status_code())
+            .insert_header(ContentType::json())
+            .body(response)
     }
 }

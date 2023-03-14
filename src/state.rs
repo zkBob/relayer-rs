@@ -1,12 +1,9 @@
-use std::{
-    sync::Mutex,
-    thread::sleep,
-    time::{Duration, SystemTime},
-};
+use std::{cmp::min, io, time::SystemTime};
 
 use actix_web::web::{self, Data};
-use kvdb::{DBOp::Insert, DBTransaction, KeyValueDB};
-use libzeropool::{
+use ethabi::ethereum_types::U64;
+use kvdb::{DBKey, DBOp::Insert, DBTransaction, KeyValueDB};
+use libzkbob_rs::libzeropool::{
     constants::OUT,
     fawkes_crypto::{
         backend::bellman_groth16::{engines::Bn256, verifier::VK},
@@ -16,15 +13,17 @@ use libzeropool::{
     native::params::PoolBN256,
 };
 use libzkbob_rs::merkle::MerkleTree;
-use memo_parser::memoparser;
-use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::Sender;
+use memo_parser::calldata::{ParsedCalldata, CalldataContent};
+use tokio::sync::{mpsc::Sender, Mutex};
+use tracing_futures::Instrument;
 use uuid::Uuid;
-use web3::types::{BlockNumber, Transaction as Web3Transaction};
+use web3::types::BlockNumber;
 
 use crate::{
-    configuration::Web3Settings, contracts::Pool, routes::send_transactions::TransactionRequest,
-    tx_checker::check_tx, helpers,
+    configuration::Settings,
+    contracts::Pool,
+    helpers,
+    types::job::{Job, JobStatus},
 };
 
 pub type DB<D> = web::Data<Mutex<MerkleTree<D, PoolBN256>>>;
@@ -34,6 +33,10 @@ pub enum SyncError {
     BadAbi(std::io::Error),
     GeneralError(String),
     ContractException(web3::contract::Error),
+    RpcNodeUnavailable,
+    Web3Error(web3::Error),
+    RequestTimeout(tokio::time::error::Elapsed),
+    RpcNodeInconsistency(String)
 }
 
 impl From<std::io::Error> for SyncError {
@@ -48,45 +51,29 @@ impl From<web3::contract::Error> for SyncError {
     }
 }
 
-#[derive(Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum JobStatus {
-    Created = 0, //Waiting for provers to get the task
-    Proving = 1, //Generating tree update proofs
-    Mining = 2,  //Waiting for tx receipt
-    Done = 3,    //
-    Rejected = 4,//This transaction or one of the preceeding tx in the queue were reverted
+impl From<web3::Error> for SyncError {
+    fn from(e: web3::Error) -> Self {
+        SyncError::Web3Error(e)
+    }
+}
+
+impl From<tokio::time::error::Elapsed> for SyncError {
+    fn from(e: tokio::time::error::Elapsed) -> Self {
+        SyncError::RequestTimeout(e)
+    }
 }
 
 pub enum JobsDbColumn {
     Jobs = 0,
     JobsIndex = 1,
     Nullifiers = 2,
-    TxCheckTasks = 3 // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective, 
-                     //so we copy only those keys that require transaction receipt check
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Job {
-    pub id: String,
-    pub created: SystemTime,
-    pub status: JobStatus,
-    pub transaction_request: Option<TransactionRequest>,
-    pub transaction: Option<Web3Transaction>,
-    pub index: u64,
-    pub commitment: Num<Fr>,
-    pub root: Option<Num<Fr>>,
-    pub nullifier: Num<Fr>,
-    pub memo: Vec<u8> // TODO: duplicates transaction_request.memo
-}
-
-impl Job {
-    pub fn reject(mut self) -> () {
-        self.status = JobStatus::Rejected;
-    }
+    TxCheckTasks = 3, // Since we have KV store, we can't query job by status, iterating over all the rows is ineffective,
+    //so we copy only those keys that require transaction receipt check
+    SyncedBlockIndex = 4,
 }
 
 pub struct State<D: 'static + KeyValueDB> {
-    pub web3: Data<Web3Settings>,
+    pub settings: Data<Settings>,
     pub pending: DB<D>,
     pub jobs: Data<D>,
     pub finalized: DB<D>,
@@ -97,138 +84,356 @@ pub struct State<D: 'static + KeyValueDB> {
 
 impl<D: 'static + KeyValueDB> State<D> {
     pub async fn sync(&self) -> Result<(), SyncError> {
-        let mut finalized = self.finalized.lock().expect("failed to acquire lock");
-        let mut pending = self.pending.lock().expect("failed to acquire lock");
+        let mut finalized = self.finalized.lock().await;
+        let mut pending = self.pending.lock().await;
 
         {
             let pool = &self.pool;
             let (contract_index, contract_root) = pool.root().await?;
-            let local_finalized_root = finalized.get_root();
-            let local_finalized_index = finalized.next_index();
-            tracing::debug!("local root {}", local_finalized_root.to_string());
-            tracing::debug!("contract root {}", contract_root.to_string());
-
-            if !local_finalized_root.eq(&contract_root) {
-                let missing_indices: Vec<u64> = (local_finalized_index..contract_index.as_u64())
-                    .step_by(OUT + 1)
-                    .into_iter()
-                    .map(|i| local_finalized_index + (i + 1) * (OUT as u64 + 1))
-                    .collect();
-                tracing::debug!("mising indices: {:?}", missing_indices);
-
-                let events = pool
-                    .get_events(Some(BlockNumber::Earliest), Some(BlockNumber::Latest), None)
-                    .await
-                    .unwrap();
-
-                std::fs::write(
-                    "tests/data/events.json",
-                    serde_json::to_string(&events).unwrap(),
-                )
-                .unwrap();
-                for event in events.iter() {
-                    let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
-                    if let Some(tx_hash) = event.transaction_hash {
-                        if let Some(tx) = pool.get_transaction(tx_hash).await.unwrap() {
-                            let calldata = memoparser::parse_calldata(&tx.input.0, None)
-                                .expect("Calldata is invalid!");
-                            
-                            let commitment = Num::from_uint_reduced(NumRepr(
-                                Uint::from_big_endian(&calldata.out_commit),
-                            ));
-                            tracing::debug!("index: {}, commit {}", index, commitment.to_string());
-                            finalized.add_leafs_and_commitments(vec![], vec![(index, commitment)]);
-
-                            if pending.next_index() <= index {
-                                pending
-                                    .add_leafs_and_commitments(vec![], vec![(index, commitment)]);
-                            }
-
-                            tracing::debug!(
-                                "root:\n\tpending:{:#?}\n\tfinalized:{:#?}",
-                                pending.get_root().to_string(),
-                                finalized.get_root().to_string()
-                            );
-
-                            use kvdb::DBKey;
-
-                            let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
-                                Uint::from_big_endian(&calldata.nullifier),
-                            ));
-
-                            // TODO: fix this
-                            let memo = Vec::from(&tx.input.0[644..(644 + calldata.memo_size) as usize]);
-
-                            let job_id = Uuid::new_v4();
-
-                            let job = Job {
-                                id: job_id.as_hyphenated().to_string(),
-                                created: SystemTime::now(),
-                                status: JobStatus::Done,
-                                transaction_request: None,
-                                transaction: Some(tx),
-                                index,
-                                commitment,
-                                nullifier,
-                                root: None,
-                                memo: helpers::truncate_memo_prefix(calldata.tx_type, memo)
-                            };
-
-                            tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash));
-                            let db_transaction = DBTransaction {
-                                ops: vec![
-                                    Insert {
-                                        col: JobsDbColumn::Jobs as u32,
-                                        key: DBKey::from_vec(
-                                            job_id.as_hyphenated().to_string().as_bytes().to_vec(),
-                                        ),
-                                        value: serde_json::to_vec(&job).unwrap(),
-                                    },
-                                    Insert { 
-                                        col: JobsDbColumn::JobsIndex as u32,
-                                        key: DBKey::from_slice(&job.index.to_be_bytes()),
-                                        value: job_id.as_hyphenated().to_string().as_bytes().to_vec(),
-                                    }
-                                ],
-                            };
-                            self.jobs.write(db_transaction)?;
-                        }
-                    }
-                }
+            if contract_root.is_zero() {
+                return Err(SyncError::RpcNodeInconsistency("failed to fetch contract root".to_string()));
             }
 
+            let local_finalized_root = finalized.get_root();
+            let local_finalized_index = finalized.next_index();
             tracing::info!(
-                "local finalized root after sync {:#?}, index : {}",
-                finalized.get_root().to_string(),
-                finalized.next_index()
+                "relayer state sync, checking indices: local={} contract={} ",
+                local_finalized_index,
+                contract_index,
             );
+
+            if !local_finalized_root.eq(&contract_root) {
+
+                let from_block = self.get_from_block();
+                let to_block = pool.block_number().await?;
+
+                let batch_size = self.settings.web3.batch_size;
+                let initial_block = from_block.as_u64();
+                let mut start_block = initial_block;
+                let finish_block = to_block.as_u64();
+                let mut batch_end_block = min(start_block + batch_size, finish_block) ;
+                tracing::info!(
+                    "starting sync from  block  #{} to block #{}",
+                    start_block,
+                    finish_block
+                );
+
+                let mut first_event_index = None;
+                while start_block < finish_block {
+                    let progress = ((start_block - from_block.as_u64()) * 100)
+                        / (finish_block - from_block.as_u64());
+
+                    let events = pool
+                        .get_events(
+                            Some(BlockNumber::Number(U64::from(start_block))),
+                            Some(BlockNumber::Number(U64::from(batch_end_block))),
+                            None,
+                        )
+                        .instrument(tracing::debug_span!("getting events from contract"))
+                        .await?;
+
+                    tracing::info!(
+                        "batch {} - {}, events: {}, progress: {}",
+                        start_block,
+                        batch_end_block,
+                        events.len(),
+                        progress,
+                    );
+                    for event in events.iter() {
+                        let index = event.event_data.0.as_u64() - (OUT + 1) as u64;
+                        first_event_index = first_event_index.or(Some(index));
+
+                        if let Some(tx_hash) = event.transaction_hash {
+                            if let Some(tx) = pool
+                                .get_transaction(tx_hash)
+                                .instrument(tracing::debug_span!(
+                                    "getting transaction by hash",
+                                    hash = tx_hash.to_string()
+                                ))
+                                .await
+                                .map_err(|_| {
+                                    SyncError::RpcNodeUnavailable
+                                })?
+                            {
+                                let calldata = ParsedCalldata::new(tx.input.0.clone(), None)
+                                    .expect("Calldata is invalid!");
+
+                                let (commitment, nullifier, memo) = match calldata.content {
+                                    CalldataContent::Transact(transact) => {
+                                        let commitment = Num::from_uint_reduced(NumRepr(
+                                            Uint::from_big_endian(&transact.out_commit),
+                                        ));
+                                        let nullifier: Num<Fr> = Num::from_uint_reduced(NumRepr(
+                                            Uint::from_big_endian(&transact.nullifier),
+                                        ));
+                                        let memo = Vec::from(
+                                            &tx.input.0[644..(644 + transact.memo_size) as usize],
+                                        );
+                                        (commitment, nullifier, helpers::truncate_memo_prefix(transact.tx_type, memo))
+                                    },
+                                    CalldataContent::AppendDirectDeposit(dd) => {
+                                        let commitment = Num::from_uint_reduced(NumRepr(
+                                            Uint::from_big_endian(&dd.commitment),
+                                        ));
+                                        // TODO: add memo
+                                        (commitment, Num::ZERO, Vec::new())
+                                    },
+                                    _ => continue,
+                                };
+
+                                tracing::debug!(
+                                    "index: {}, commit {}",
+                                    index,
+                                    commitment.to_string()
+                                );
+                                finalized
+                                    .add_leafs_and_commitments(vec![], vec![(index, commitment)]);
+
+                                if pending.next_index() <= index {
+                                    pending.add_leafs_and_commitments(
+                                        vec![],
+                                        vec![(index, commitment)],
+                                    );
+                                }
+
+                                tracing::debug!(
+                                    "saved commitment at index = {}",
+                                    finalized.next_index()
+                                );
+
+                                let job_id = Uuid::new_v4();
+
+                                let job = Job {
+                                    id: job_id.as_hyphenated().to_string(),
+                                    created: SystemTime::now(),
+                                    status: JobStatus::Done,
+                                    transaction_request: None,
+                                    transaction: Some(tx),
+                                    index,
+                                    commitment,
+                                    nullifier,
+                                    root: None,
+                                    memo,
+                                };
+
+                                tracing::debug!("writing tx hash {:#?}", hex::encode(tx_hash));
+                                let db_transaction = DBTransaction {
+                                    ops: vec![
+                                        Insert {
+                                            col: JobsDbColumn::Jobs as u32,
+                                            key: DBKey::from_vec(
+                                                job_id
+                                                    .as_hyphenated()
+                                                    .to_string()
+                                                    .as_bytes()
+                                                    .to_vec(),
+                                            ),
+                                            value: serde_json::to_vec(&job).unwrap(),
+                                        },
+                                        Insert {
+                                            col: JobsDbColumn::JobsIndex as u32,
+                                            key: DBKey::from_slice(&job.index.to_be_bytes()),
+                                            value: job_id
+                                                .as_hyphenated()
+                                                .to_string()
+                                                .as_bytes()
+                                                .to_vec(),
+                                        },
+                                    ],
+                                };
+                                self.jobs.write(db_transaction)?;
+                            }
+                        }
+                    }
+
+                    tracing::debug!(
+                        "batch {} - {} new next index:  {}",
+                        start_block,
+                        batch_end_block,
+                        finalized.next_index(),
+                    );
+                    tracing::debug!("saving last block  to db:  {}", batch_end_block);
+                    self.save_last_block(batch_end_block)?;
+
+                    start_block = batch_end_block;
+                    batch_end_block = min(batch_end_block + batch_size, finish_block);
+                }
+
+                let (local_index, local_root) = (finalized.next_index(), finalized.get_root());
+
+                tracing::info!(
+                    "relayer sync finish\nlocal:   {} | {},\ncontract:{} | {}",
+                    local_index,
+                    local_root,
+                    contract_index,
+                    contract_root
+                );
+
+                if local_index < contract_index.as_u64() {
+                    tracing::warn!("some event was probably skipped, start block will be decreased");
+                    let last_block = initial_block.saturating_sub(batch_size);
+                    self.save_last_block(last_block)?;
+                    return Err(SyncError::RpcNodeInconsistency("index mismatch".to_string()))
+                }
+
+                if local_index == contract_index.as_u64() && local_root != contract_root {
+                    let rollback_count = self.get_rollback_count() + self.settings.web3.rollback_step;
+                    let rollback_index = local_index.saturating_sub(rollback_count * (OUT + 1) as u64);
+
+                    tracing::error!("root mismatch, rollback to: {}", rollback_index);
+
+                    if first_event_index.is_none() || first_event_index.unwrap() > rollback_index {
+                        let last_block = initial_block.saturating_sub(batch_size);
+                        self.save_last_block(last_block)?;
+                    } else {
+                        self.save_last_block(initial_block)?;
+                    }
+
+                    finalized.rollback(rollback_index);
+                    pending.rollback(rollback_index);
+
+                    let mut tx = self.jobs.transaction();
+                    for index in (rollback_index..local_index).step_by(OUT + 1) {
+                        let job_id = self.jobs.get(JobsDbColumn::JobsIndex as u32, &index.to_be_bytes())
+                            .map_err(|_| SyncError::GeneralError("data base read error".to_string()))?;
+                        if job_id.is_none() {
+                            continue;
+                        }
+                        let job_id = job_id.unwrap();
+
+                        tx.delete(JobsDbColumn::JobsIndex as u32, &index.to_be_bytes());
+                    
+
+                        let job = self.jobs.get(JobsDbColumn::Jobs as u32, &job_id)
+                            .map_err(|_| SyncError::GeneralError("data base read error".to_string()))?;
+                        if job.is_none() {
+                            continue;
+                        }
+
+                        tx.delete(JobsDbColumn::Jobs as u32, &job_id);
+                    }
+                    self.jobs.write(tx)?;
+
+                    self.save_rollback_count(rollback_count)?;
+
+                    return Err(SyncError::GeneralError("root mismatch".to_string()))
+                }
+
+                self.save_rollback_count(0)?;
+            }
         }
 
         Ok(())
     }
 
-    pub fn start_poller(self) -> () {
-        let jobs: Vec<Job> = self
-            .jobs
-            .iter(JobsDbColumn::TxCheckTasks as u32)
-            .map(|(_k, v)| serde_json::from_slice(&v[..]).unwrap())
-            .collect();
-        tokio::spawn(async move {
-            let state = Data::new(self);
-            for job in jobs.into_iter() {
-                let state = state.clone();
-                tracing::debug!("polling started at {:?}", SystemTime::now());
-                match check_tx(job, state).await {
-                    Err(_) | Ok(JobStatus::Rejected) => {
-                        tracing::warn!(
-                            "caught error / revert " // TODO: add job id
-                        );
+    pub fn save_new_job(&self, job: &Job) -> io::Result<()> {
+        let nullifier_key = DBKey::from_slice(&helpers::serialize(job.nullifier).unwrap());
+
+        self.jobs.write(DBTransaction {
+            ops: vec![
+                /*
+                Saving Job info with transaction request to be later retrieved by client
+                In case of rollback an existing row is mutated
+                TODO: use Borsh instead of JSON
+                */
+                Insert {
+                    col: JobsDbColumn::Jobs as u32,
+                    key: DBKey::from_slice(job.id.as_bytes()),
+                    value: serde_json::to_string(&job).unwrap().as_bytes().to_vec(),
+                },
+                /*
+                Saving nullifiers to avoid double spend spam-atack.
+                Nullifiers are stored to persistent DB, if rollback happens, they get deleted individually
+                 */
+                Insert {
+                    col: JobsDbColumn::Nullifiers as u32,
+                    key: nullifier_key,
+                    value: vec![],
+                },
+            ],
+        })
+    }
+
+    pub fn get_jobs(&self, offset: u64, limit: u64) -> Result<Vec<Job>, String> {
+        let mut jobs = vec![];
+        let mut index = offset;
+        for _ in 0..limit {
+            let job_id = self
+                .jobs
+                .get(JobsDbColumn::JobsIndex as u32, &index.to_be_bytes());
+            if let Ok(Some(job_id)) = job_id {
+                let job = self.jobs.get(JobsDbColumn::Jobs as u32, &job_id);
+                if let Ok(Some(job)) = job {
+                    let job: Job = serde_json::from_slice(&job).unwrap();
+                    if job.transaction.is_none() {
                         break;
                     }
-                    _ => (),
+                    jobs.push(job);
+                    index += (OUT + 1) as u64;
+                } else {
+                    break;
                 }
+            } else {
+                break;
             }
-            sleep(Duration::from_secs(5));
-        });
+        }
+        Ok(jobs)
+    }
+
+
+    fn get_from_block(&self) -> U64 {
+        self
+            .jobs
+            .get(
+                JobsDbColumn::SyncedBlockIndex as u32,
+                "last_block".as_bytes(),
+            )
+            .ok()
+            .flatten()
+            .map(|from_block| U64::from_big_endian(&from_block))
+            .unwrap_or(
+                self.settings
+                    .web3
+                    .start_block
+                    .map(|block_num| U64::from(block_num))
+                    .unwrap_or(U64::from(0)),
+            )
+    }
+
+    pub fn save_last_block(&self, to_block: u64) -> Result<(), SyncError> {
+        self.jobs
+            .write({
+                let mut tx = self.jobs.transaction();
+                tx.put(JobsDbColumn::SyncedBlockIndex as u32, "last_block".as_bytes(), &to_block.to_be_bytes());
+                tx
+            })
+            .map_err(|err| {
+                SyncError::GeneralError(format!("failed to save last synced block: {:?}", err))
+            })
+    }
+
+    fn save_rollback_count(&self, rollback_count: u64) -> Result<(), SyncError> {
+        self.jobs
+            .write({
+                let mut tx = self.jobs.transaction();
+                tx.put(JobsDbColumn::SyncedBlockIndex as u32, "rollback_count".as_bytes(), &rollback_count.to_be_bytes());
+                tx
+            })
+            .map_err(|err| {
+                SyncError::GeneralError(format!("failed to save rollback count: {:?}", err))
+            })
+    }
+
+    fn get_rollback_count(&self) -> u64 {
+        self
+            .jobs
+            .get(
+                JobsDbColumn::SyncedBlockIndex as u32,
+                "rollback_count".as_bytes(),
+            )
+            .ok()
+            .flatten()
+            .map(|rollback_count| u64::from_be_bytes(rollback_count.try_into().unwrap()))
+            .unwrap_or(0)
     }
 }
