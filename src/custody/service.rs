@@ -427,7 +427,7 @@ impl CustodyService {
         let fee = state.settings.web3.relayer_fee;
 
         for account in self.accounts.iter() {
-            self.sync_account(account.id, &state).await?;
+            //self.sync_account(account.id, &state).await?;
             let admin_info = account.admin_info(fee).await;
             res.push(admin_info);
         }
