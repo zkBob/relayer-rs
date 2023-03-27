@@ -4,7 +4,7 @@ on:
   push:
     branches: ["custody"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "custody"]
 
 env:
   DOCKER_REGISTRY: ghcr.io

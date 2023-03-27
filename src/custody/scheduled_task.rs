@@ -160,6 +160,8 @@ impl<D: KeyValueDB> ScheduledTask<D> {
                 .post(relayer_endpoint)
                 .json(&tx_request)
                 .header("Content-type", "application/json")
+                .header("zkbob-support-id", "zkbob-cloud")
+                .header("zkbob-libjs-version", "2.0.2")
                 .send()
                 .instrument(tracing::info_span!(
                     "sending to relayer",
