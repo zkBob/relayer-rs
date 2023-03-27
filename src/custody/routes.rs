@@ -262,6 +262,8 @@ pub async fn fetch_tx_status(
 ) -> Result<TransactionStatusResponse, CustodyServiceError> {
     let response = reqwest::Client::new()
         .get(relayer_endpoint)
+        .header("zkbob-support-id", "zkbob-cloud")
+        .header("zkbob-libjs-version", "2.0.2")
         .send()
         .await
         .map_err(|e| {
